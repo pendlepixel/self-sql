@@ -12,6 +12,82 @@ History:
 #ifndef SQLITE3_H_
 #define SQLITE3_H_
 
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
+#include <errno.h>
+#include <assert.h>
+
+
+#ifdef SQLITE_INT64_TYPE
+  typedef SQLITE_INT64_TYPE sqlite_int64;
+  typedef unsigned SQLITE_INT64_TYPE sqlite_uint64;
+#elif defined(_MSC_VER) || defined(__BORLANDC__)
+  typedef __int64 sqlite_int64;
+  typedef unsigned __int64 sqlite_uint64;
+#else
+  typedef long long int sqlite_int64;
+  typedef unsigned long long int sqlite_uint64;
+#endif
+typedef sqlite_int64 sqlite3_int64;
+typedef sqlite_uint64 sqlite3_uint64;
+
+
+/*
+** CAPI3REF: Result Codes
+** KEYWORDS: {result code definitions}
+**
+** Many SQLite functions return an integer result code from the set shown
+** here in order to indicate success or failure.
+**
+** New error codes may be added in future versions of SQLite.
+**
+** See also: [extended result code definitions]
+*/
+#define SQLITE_OK           0   /* Successful result */
+/* beginning-of-error-codes */
+#define SQLITE_ERROR        1   /* SQL error or missing database */
+#define SQLITE_INTERNAL     2   /* Internal logic error in SQLite */
+#define SQLITE_PERM         3   /* Access permission denied */
+#define SQLITE_ABORT        4   /* Callback routine requested an abort */
+#define SQLITE_BUSY         5   /* The database file is locked */
+#define SQLITE_LOCKED       6   /* A table in the database is locked */
+#define SQLITE_NOMEM        7   /* A malloc() failed */
+#define SQLITE_READONLY     8   /* Attempt to write a readonly database */
+#define SQLITE_INTERRUPT    9   /* Operation terminated by sqlite3_interrupt()*/
+#define SQLITE_IOERR       10   /* Some kind of disk I/O error occurred */
+#define SQLITE_CORRUPT     11   /* The database disk image is malformed */
+#define SQLITE_NOTFOUND    12   /* Unknown opcode in sqlite3_file_control() */
+#define SQLITE_FULL        13   /* Insertion failed because database is full */
+#define SQLITE_CANTOPEN    14   /* Unable to open the database file */
+#define SQLITE_PROTOCOL    15   /* Database lock protocol error */
+#define SQLITE_EMPTY       16   /* Database is empty */
+#define SQLITE_SCHEMA      17   /* The database schema changed */
+#define SQLITE_TOOBIG      18   /* String or BLOB exceeds size limit */
+#define SQLITE_CONSTRAINT  19   /* Abort due to constraint violation */
+#define SQLITE_MISMATCH    20   /* Data type mismatch */
+#define SQLITE_MISUSE      21   /* Library used incorrectly */
+#define SQLITE_NOLFS       22   /* Uses OS features not supported on host */
+#define SQLITE_AUTH        23   /* Authorization denied */
+#define SQLITE_FORMAT      24   /* Auxiliary database format error */
+#define SQLITE_RANGE       25   /* 2nd parameter to sqlite3_bind out of range */
+#define SQLITE_NOTADB      26   /* File opened that is not a database file */
+#define SQLITE_NOTICE      27   /* Notifications from sqlite3_log() */
+#define SQLITE_WARNING     28   /* Warnings from sqlite3_log() */
+#define SQLITE_ROW         100  /* sqlite3_step() has another row ready */
+#define SQLITE_DONE        101  /* sqlite3_step() has finished executing */
+
+
+//////////////////////////////////////
+//  define for vfs
+//////////////////////////////////////
+#define SQL_DEFAULT_FILE_CREATE_MODE  744
+
+
+
 //结构体sqlite3_io_method
 typedef struct sqlite3_io_method sqlite3_io_method
 struct sqlite3_io_method
@@ -42,6 +118,7 @@ struct sqlite3_io_method
     int (*xFetch)(sqlite3_file*, sqlite3_int64 iOfst, int iAmt, void** pp);
     int (*xUnfetch)(sqlite3_file*, sqlite3_int64 iOfst, void* p);
 };
+
 
 //结构体sqlite3_file
 typedef struct sqlite3_file sqlite3_file;
@@ -82,7 +159,7 @@ struct sqlite3_vfs
 
     //版本3增加的函数指针
     int (*xSetSystemCall)(sqlite3_vfs*, const char* zName, sqlite3_syscall_ptr);
-    sqlite3_syscall_ptr (*xGetSystemCall)(sqlite3_vfs*, const cahr* zName);
+    sqlite3_syscall_ptr (*xGetSystemCall)(sqlite3_vfs*, const char* zName);
     const char* (*xNextSystemCall)(sqlite3_vfs*, const char* zName);
 };
 
