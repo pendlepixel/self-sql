@@ -13,13 +13,14 @@ History:
 #define SQLITE3_H_
 
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <cassert>
+#include <cerrno>
 #include <fcntl.h>
-#include <string.h>
 #include <unistd.h>
-#include <errno.h>
-#include <assert.h>
+#include <cstdio>
+#include <cstdlib>
+
+#include <string.h>
 
 
 #ifdef SQLITE_INT64_TYPE
@@ -34,6 +35,60 @@ History:
 #endif
 typedef sqlite_int64 sqlite3_int64;
 typedef sqlite_uint64 sqlite3_uint64;
+
+
+/*
+** Integers of known sizes.  These typedefs might change for architectures
+** where the sizes very.  Preprocessor macros are available so that the
+** types can be conveniently redefined at compile-type.  Like this:
+**
+**         cc '-DUINTPTR_TYPE=long long int' ...
+*/
+#ifndef UINT32_TYPE
+# ifdef HAVE_UINT32_T
+#  define UINT32_TYPE uint32_t
+# else
+#  define UINT32_TYPE unsigned int
+# endif
+#endif
+#ifndef UINT16_TYPE
+# ifdef HAVE_UINT16_T
+#  define UINT16_TYPE uint16_t
+# else
+#  define UINT16_TYPE unsigned short int
+# endif
+#endif
+#ifndef INT16_TYPE
+# ifdef HAVE_INT16_T
+#  define INT16_TYPE int16_t
+# else
+#  define INT16_TYPE short int
+# endif
+#endif
+#ifndef UINT8_TYPE
+# ifdef HAVE_UINT8_T
+#  define UINT8_TYPE uint8_t
+# else
+#  define UINT8_TYPE unsigned char
+# endif
+#endif
+#ifndef INT8_TYPE
+# ifdef HAVE_INT8_T
+#  define INT8_TYPE int8_t
+# else
+#  define INT8_TYPE signed char
+# endif
+#endif
+#ifndef LONGDOUBLE_TYPE
+# define LONGDOUBLE_TYPE long double
+#endif
+typedef sqlite_int64 i64;          /* 8-byte signed integer */
+typedef sqlite_uint64 u64;         /* 8-byte unsigned integer */
+typedef UINT32_TYPE u32;           /* 4-byte unsigned integer */
+typedef UINT16_TYPE u16;           /* 2-byte unsigned integer */
+typedef INT16_TYPE i16;            /* 2-byte signed integer */
+typedef UINT8_TYPE u8;             /* 1-byte unsigned integer */
+typedef INT8_TYPE i8;              /* 1-byte signed integer */
 
 
 /*
@@ -87,16 +142,17 @@ typedef sqlite_uint64 sqlite3_uint64;
 #define SQL_DEFAULT_FILE_CREATE_MODE  744
 
 
+//结构体声明
+struct sqlite3_file;
 
 //结构体sqlite3_io_method
-typedef struct sqlite3_io_method sqlite3_io_method
-struct sqlite3_io_method
+typedef struct sqlite3_io_method
 {
     int iVersion;
 
     //版本1函数指针
     int (*xClose)(sqlite3_file*);
-    int (*xRead)(sqlite3_file*, int iAmt, sqlite3_int64 iOfst);
+    int (*xRead)(sqlite3_file*, void*, int iAmt, sqlite3_int64 iOfst);
     int (*xWrite)(sqlite3_file*, const void*, int iAmt, sqlite3_int64 iOfst);
     int (*xTruncate)(sqlite3_file*, sqlite3_int64 size);
     int (*xSync)(sqlite3_file*, int flags);
@@ -117,21 +173,19 @@ struct sqlite3_io_method
     //版本3函数指针
     int (*xFetch)(sqlite3_file*, sqlite3_int64 iOfst, int iAmt, void** pp);
     int (*xUnfetch)(sqlite3_file*, sqlite3_int64 iOfst, void* p);
-};
+}sqlite3_io_method;
 
 
 //结构体sqlite3_file
-typedef struct sqlite3_file sqlite3_file;
-struct sqlite3_file
+typedef struct sqlite3_file
 {
     const struct sqlite3_io_method* pMethods;  //打开文件的方法
-};
+}sqlite3_file;
 
 
 //结构体sqlite3_vfs
-typedef struct sqlite3_vfs sqlites_vfs;
 typedef void (*sqlite3_syscall_ptr)(void);
-struct sqlite3_vfs
+typedef struct sqlite3_vfs
 {
     int iVersion;  //结构体版本号，当前版本是3
     int szOsFile;  //sqlite3文件的大小
@@ -149,7 +203,7 @@ struct sqlite3_vfs
     void (*xDlError)(sqlite3_vfs*, int nByte, char* zErrMsg);
     void (*(*xDlSym)(sqlite3_vfs*, void*, const char* zSymbol))(void);
     void (*xDlClose)(sqlite3_vfs*, void*);
-    void (*xRandomness)(sqlite3_vfs*, int nByte, char* zOut);
+    int (*xRandomness)(sqlite3_vfs*, int nByte, char* zOut);
     int (*xSleep)(sqlite3_vfs*, int microseconds);
     int (*xCurrentTime)(sqlite3_vfs*, double*);
     int (*xGetLastError)(sqlite3_vfs*, int, char*);
@@ -161,7 +215,7 @@ struct sqlite3_vfs
     int (*xSetSystemCall)(sqlite3_vfs*, const char* zName, sqlite3_syscall_ptr);
     sqlite3_syscall_ptr (*xGetSystemCall)(sqlite3_vfs*, const char* zName);
     const char* (*xNextSystemCall)(sqlite3_vfs*, const char* zName);
-};
+}sqlite3_vfs;
 
 
 

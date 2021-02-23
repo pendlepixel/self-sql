@@ -12,6 +12,10 @@ History:
 #include "os.h"
 
 
+#ifndef SQLITE_PRIVATE
+# define SQLITE_PRIVATE static
+#endif
+
 #if defined(SQLITE_TEST)
 int sqlite3_memdebug_vfs_oom_test = 1;
   #define DO_OS_MALLOC_TEST(x)                                       \
@@ -24,6 +28,42 @@ int sqlite3_memdebug_vfs_oom_test = 1;
   #define DO_OS_MALLOC_TEST(x)
 #endif
 
+/*
+** The default size of a disk sector
+*/
+#ifndef SQLITE_DEFAULT_SECTOR_SIZE
+# define SQLITE_DEFAULT_SECTOR_SIZE 4096
+#endif
+
+/*
+** When SQLITE_OMIT_WSD is defined, it means that the target platform does
+** not support Writable Static Data (WSD) such as global and static variables.
+** All variables must either be on the stack or dynamically allocated from
+** the heap.  When WSD is unsupported, the variable declarations scattered
+** throughout the SQLite code must become constants instead.  The SQLITE_WSD
+** macro is used for this purpose.  And instead of referencing the variable
+** directly, we use its constant as a key to lookup the run-time allocated
+** buffer that holds real variable.  The constant is also the initializer
+** for the run-time allocated buffer.
+**
+** In the usual case where WSD is supported, the SQLITE_WSD and GLOBAL
+** macros become no-ops and have zero performance impact.
+*/
+#ifdef SQLITE_OMIT_WSD
+  #define SQLITE_WSD const
+  #define GLOBAL(t,v) (*(t*)sqlite3_wsd_find((void*)&(v), sizeof(v)))
+  #define sqlite3GlobalConfig GLOBAL(struct Sqlite3Config, sqlite3Config)
+SQLITE_API int SQLITE_STDCALL sqlite3_wsd_init(int N, int J);
+SQLITE_API void *SQLITE_STDCALL sqlite3_wsd_find(void *K, int L);
+#else
+  #define SQLITE_WSD
+  #define GLOBAL(t,v) v
+  #define sqlite3GlobalConfig sqlite3Config
+#endif
+
+
+SQLITE_PRIVATE void *sqlite3Malloc(u64);
+SQLITE_PRIVATE void *sqlite3MallocZero(u64);
 
 
 //获取sqlite3_file方法的函数
@@ -93,7 +133,7 @@ int sqlite3OsFileControl(sqlite3_file* id, int op, void* pArg)
 
 void sqlite3OsFileControlHint(sqlite3_file* id, int op, void* pArg)
 {
-    (void)id->pMethods-xFileControl(id, op, pArg);
+    (void)id->pMethods->xFileControl(id, op, pArg);
 }
 
 int sqlite3OsSectorSize(sqlite3_file* id)
@@ -202,7 +242,7 @@ int sqlite3OsSleep(sqlite3_vfs* pVfs, int nMicro)
     return pVfs->xSleep(pVfs, nMicro);
 }
 
-int sqlite3OsCurrentTimeInt64(sqlite3_vfs* pVfs, sqlite3_int64* pTimeOut)
+int sqlite3OsCurrentTimeInt64(sqlite3_vfs* pVfs, i64* pTimeOut)
 {
     int rc;
     /* IMPLEMENTATION-OF: R-49045-42493 SQLite will use the xCurrentTimeInt64()
@@ -218,12 +258,60 @@ int sqlite3OsCurrentTimeInt64(sqlite3_vfs* pVfs, sqlite3_int64* pTimeOut)
     }
     else
     {
+        double r;
         rc = pVfs->xCurrentTime(pVfs, &r);
-        *pTimeOut = (sqlite3_int64)(r* 86400000.0);
+        *pTimeOut = (i64)(r* 86400000.0);
     }
 
     return rc;
 }
+
+
+/*
+** Allocate memory.  This routine is like sqlite3_malloc() except that it
+** assumes the memory subsystem has already been initialized.
+*/
+SQLITE_PRIVATE void *sqlite3Malloc(u64 n)
+{
+    void *p;
+
+    if( n==0 || n>=0x7fffff00 )
+    {
+        /* A memory allocation of a number of bytes which is near the maximum
+        ** signed integer value might cause an integer overflow inside of the
+        ** xMalloc().  Hence we limit the maximum size to 0x7fffff00, giving
+        ** 255 bytes of overhead.  SQLite itself will never use anything near
+        ** this amount.  The only way to reach the limit is with sqlite3_malloc() */
+        p = 0;
+    }
+    else if( sqlite3GlobalConfig.bMemstat )
+    {
+        sqlite3_mutex_enter(mem0.mutex);
+        mallocWithAlarm((int)n, &p);
+        sqlite3_mutex_leave(mem0.mutex);
+    }
+    else
+    {
+        p = sqlite3GlobalConfig.m.xMalloc((int)n);
+    }
+
+    assert( EIGHT_BYTE_ALIGNMENT(p) );  /* IMP: R-11148-40995 */
+    return p;
+}
+
+
+/*
+** Allocate and zero memory.
+*/
+SQLITE_PRIVATE void *sqlite3MallocZero(u64 n)
+{
+  void *p = sqlite3Malloc(n);
+  if( p ){
+    memset(p, 0, (size_t)n);
+  }
+  return p;
+}
+
 
 //为sqlite3_melloc()所写的用来申请和释放内存空间的函数
 int sqlite3OsOpenMalloc(sqlite3_vfs* pVfs, const char* zFile, sqlite3_file** ppFile, int flags, int* pOutFlags)
@@ -282,7 +370,7 @@ static sqlite3_vfs* SQLITE_WSD vfsList = 0;
 sqlite3_vfs* sqlite3_vfs_find(const char* zVfs)
 {
     sqlite3_vfs* pVfs = 0;
-#define SQLTIE_THREADSAFE
+#if SQLTIE_THREADSAFE
     sqlite_mutex* mutex;
 #endif
 

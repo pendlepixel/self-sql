@@ -21,11 +21,11 @@ int sqlite3OsInit(void);
 
 //获取sqlite3_file方法的函数
 int sqlite3OsClose(sqlite3_file*);
-int sqlite3OsRead(sqlite3_file*, void*, int amt, i64 offset);
-int sqlite3OsWrite(sqlite3_file*, const void*, int amt, i64 offset);
-int sqlite3OsTruncate(sqlite3_file*, i64 size);
+int sqlite3OsRead(sqlite3_file*, void*, int amt, sqlite3_int64 offset);
+int sqlite3OsWrite(sqlite3_file*, const void*, int amt, sqlite3_int64 offset);
+int sqlite3OsTruncate(sqlite3_file*, sqlite3_int64 size);
 int sqlite3OsSync(sqlite3_file*, int);
-int sqlite3OsFileSize(sqlite3_file*, i64* pSize);
+int sqlite3OsFileSize(sqlite3_file*, sqlite3_int64* pSize);
 int sqlite3OsLock(sqlite3_file*, int);
 int sqlite3OsUnlock(sqlite3_file*, int);
 int sqlite3OsCheckReservedLock(sqlite3_file* id, int* pResOut);
