@@ -375,3 +375,23 @@ int sqlite3_vfs_unregister(sqlite3_vfs* pVfs)
     sqlite3_mutex_leave(mutex);
     return SQLITE_OK;
 }
+
+
+sqlite3_vfs* osGetVFSHandle(sqlite3_vfs* vfs_name)
+{
+    if (0 == strcmp(vfs_name, "unix"))
+    {
+        return (sqlite3_vfs*)unixGetOS();
+    }
+    else
+    {
+        return 0;
+    }
+}
+
+
+sqlite3_file* osGetFileHandle(const char* vfs)
+{
+    sqlite3_file* p = (sqlite3_file*) malloc(vfs->sz_file);
+    return p;
+}

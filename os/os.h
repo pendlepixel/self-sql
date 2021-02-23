@@ -61,4 +61,8 @@ int sqlite3OsOpenMalloc(sqlite3_vfs*, const char*, sqlite3_file**, int, int*);
 int sqlite3OsCloseFree(sqlite3_file*);
 
 
+//获取file和vfs句柄的函数
+sqlite3_vfs* osGetVFSHandle(sqlite3_vfs* vfs_name);
+sqlite3_file* osGetFileHandle(const char* vfs);
+
 #endif  //OS_OS_H_
