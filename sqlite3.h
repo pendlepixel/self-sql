@@ -4,7 +4,7 @@ File name : os.h
 Author : pendle
 Version : V1.0
 Date : 20210126
-Description : sqlite3相关的头文件
+Description : sqlite3相关的头文件__
 Others:
 History:
 *************************************************/
