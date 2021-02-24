@@ -36,30 +36,64 @@ int sqlite3_memdebug_vfs_oom_test = 1;
 #endif
 
 /*
-** When SQLITE_OMIT_WSD is defined, it means that the target platform does
-** not support Writable Static Data (WSD) such as global and static variables.
-** All variables must either be on the stack or dynamically allocated from
-** the heap.  When WSD is unsupported, the variable declarations scattered
-** throughout the SQLite code must become constants instead.  The SQLITE_WSD
-** macro is used for this purpose.  And instead of referencing the variable
-** directly, we use its constant as a key to lookup the run-time allocated
-** buffer that holds real variable.  The constant is also the initializer
-** for the run-time allocated buffer.
-**
-** In the usual case where WSD is supported, the SQLITE_WSD and GLOBAL
-** macros become no-ops and have zero performance impact.
+** EVIDENCE-OF: R-25715-37072 Memory allocation statistics are enabled by
+** default unless SQLite is compiled with SQLITE_DEFAULT_MEMSTATUS=0 in
+** which case memory allocation statistics are disabled by default.
 */
-#ifdef SQLITE_OMIT_WSD
-  #define SQLITE_WSD const
-  #define GLOBAL(t,v) (*(t*)sqlite3_wsd_find((void*)&(v), sizeof(v)))
-  #define sqlite3GlobalConfig GLOBAL(struct Sqlite3Config, sqlite3Config)
-SQLITE_API int SQLITE_STDCALL sqlite3_wsd_init(int N, int J);
-SQLITE_API void *SQLITE_STDCALL sqlite3_wsd_find(void *K, int L);
-#else
-  #define SQLITE_WSD
-  #define GLOBAL(t,v) v
-  #define sqlite3GlobalConfig sqlite3Config
+#if !defined(SQLITE_DEFAULT_MEMSTATUS)
+# define SQLITE_DEFAULT_MEMSTATUS 1
 #endif
+
+#define SQLITE_WSD
+#define GLOBAL(t,v) v
+#define sqlite3GlobalConfig sqlite3Config
+
+/*
+** Structure containing global configuration data for the SQLite library.
+**
+** This structure also contains some state information.
+*/
+struct Sqlite3Config {
+  int bMemstat;                     /* True to enable memory status */
+  sqlite3_mem_methods m;            /* Low-level memory allocation interface */
+  int bLocaltimeFault;              /* True to fail localtime() calls */
+};
+
+/*
+** The following singleton contains the global configuration for
+** the SQLite library.
+*/
+SQLITE_PRIVATE struct Sqlite3Config sqlite3Config = {
+   SQLITE_DEFAULT_MEMSTATUS,  /* bMemstat */
+   {0,0,0,0,0,0,0,0},         /* m */
+   0                          /* bLocaltimeFault */
+};
+
+/*
+** State information local to the memory allocation subsystem.
+*/
+static SQLITE_WSD struct Mem0Global {
+  sqlite3_mutex *mutex;         /* Mutex to serialize access */
+  sqlite3_int64 alarmThreshold; /* The soft heap limit */
+
+  /*
+  ** Pointers to the end of sqlite3GlobalConfig.pScratch memory
+  ** (so that a range test can be used to determine if an allocation
+  ** being freed came from pScratch) and a pointer to the list of
+  ** unused scratch allocations.
+  */
+  void *pScratchEnd;
+  ScratchFreeslot *pScratchFree;
+  u32 nScratchFree;
+
+  /*
+  ** True if heap is nearly "full" where "full" is defined by the
+  ** sqlite3_soft_heap_limit() setting.
+  */
+  int nearlyFull;
+} mem0 = { 0, 0, 0, 0, 0, 0 };
+
+#define mem0 GLOBAL(struct Mem0Global, mem0)
 
 
 SQLITE_PRIVATE void *sqlite3Malloc(u64);
