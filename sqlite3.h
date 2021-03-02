@@ -308,6 +308,14 @@ typedef struct sqlite3_vfs
     const char* (*xNextSystemCall)(sqlite3_vfs*, const char* zName);
 }sqlite3_vfs;
 
+/*
+** Each recursive mutex is an instance of the following structure.
+*/
+struct sqlite3_mutex {
+  CRITICAL_SECTION mutex;    /* Mutex controlling the lock */
+  int id;                    /* Mutex type */
+};
+
 
 /*
 ** CAPI3REF: Mutexes

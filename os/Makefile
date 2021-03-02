@@ -5,7 +5,7 @@ CPPFLAGS = -std=c++11
 os : $(objects)
 	$(CPP) $(CPPFLAGS) $(objects) -o os
 
-os.o : os.h
+os.o : os.h mutex.h
 
 .PHONY : clean
 

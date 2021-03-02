@@ -10,6 +10,7 @@ History:
 *************************************************/
 
 #include "os.h"
+#include "mutex.h"
 
 
 #ifndef SQLITE_PRIVATE

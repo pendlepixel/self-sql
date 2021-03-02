@@ -11,6 +11,7 @@ History:
 
 #include "../sqlite3.h"
 
+
 typedef struct unix_file unix_file;
 struct unix_file 
 {
