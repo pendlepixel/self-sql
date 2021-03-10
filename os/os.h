@@ -115,7 +115,7 @@
 #endif
 
 /*
-** The default size of a disk sector
+** The default size of a disk sector  默认硬盘扇形默认大小
 */
 #ifndef SQLITE_DEFAULT_SECTOR_SIZE
 # define SQLITE_DEFAULT_SECTOR_SIZE 4096
@@ -143,7 +143,7 @@
 ** of the file.
 */
 #ifndef SQLITE_TEMP_FILE_PREFIX
-# define SQLITE_TEMP_FILE_PREFIX "etilqs_"
+# define SQLITE_TEMP_FILE_PREFIX "etilqs_"  //临时文件用这个开头
 #endif
 
 /*
@@ -163,11 +163,16 @@
 ** lock. This can be upgraded to an EXCLUSIVE lock by a subsequent call to
 ** sqlite3OsLock().
 */
-#define NO_LOCK         0
-#define SHARED_LOCK     1
-#define RESERVED_LOCK   2
-#define PENDING_LOCK    3
-#define EXCLUSIVE_LOCK  4
+
+/* 辅助参考地址：http://www.blogjava.net/qileilove/archive/2014/01/24/409313.html
+** 保留锁被使用，表示数据库将被写，一个数据库只能有一个保留锁，保留锁可以和共享锁共存，与pending_lock
+** 的不同之处在于还能获得新的共享锁，pending锁被激活时，不能再获得共享锁
+*/
+#define NO_LOCK         0  //不加锁
+#define SHARED_LOCK     1  //共享锁
+#define RESERVED_LOCK   2  //保留锁
+#define PENDING_LOCK    3  //等待锁
+#define EXCLUSIVE_LOCK  4  //排它锁
 
 /*
 ** File Locking Notes:  (Mostly about windows but also some info for Unix)
@@ -177,13 +182,18 @@
 ** UnlockFile().
 **
 ** LockFile() prevents not just writing but also reading by other processes.
+** SAHRED_LOCK只锁定一个随机的单个字节，所以能实现共享，因为有很多个自己供选择
 ** A SHARED_LOCK is obtained by locking a single randomly-chosen 
 ** byte out of a specific range of bytes. The lock byte is obtained at 
 ** random so two separate readers can probably access the file at the 
 ** same time, unless they are unlucky and choose the same lock byte.
+** EXCLUSIVE_LOCK锁定范围内的所有自己，因此只能被一个线程使用，实现排他功能
 ** An EXCLUSIVE_LOCK is obtained by locking all bytes in the range.
-** There can only be one writer.  A RESERVED_LOCK is obtained by locking
+** There can only be one writer.  
+** RESERVED_LOCK锁定的是一个文件指定锁区域内的单个字节
+** A RESERVED_LOCK is obtained by locking
 ** a single byte of the file that is designated as the reserved lock byte.
+** PENDING_LOCK是锁定单个特定的不同于RESERVED_LOCK的字节
 ** A PENDING_LOCK is obtained by locking a designated byte different from
 ** the RESERVED_LOCK byte.
 **
@@ -225,13 +235,13 @@
 **
 */
 #ifdef SQLITE_OMIT_WSD
-# define PENDING_BYTE     (0x40000000)
+# define PENDING_BYTE     (0x40000000)  //锁可选择的字节的开始位置
 #else
 # define PENDING_BYTE      sqlite3PendingByte
 #endif
 #define RESERVED_BYTE     (PENDING_BYTE+1)
-#define SHARED_FIRST      (PENDING_BYTE+2)
-#define SHARED_SIZE       510
+#define SHARED_FIRST      (PENDING_BYTE+2)  //共享锁可选择的字节的开始位置
+#define SHARED_SIZE       510  //共享锁可选择的字节的范围
 
 /*
 ** Wrapper around OS specific sqlite3_os_init() function.
