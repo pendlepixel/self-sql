@@ -21,91 +21,10 @@
 #define _SQLITE_OS_H_
 
 /*
-** Figure out if we are dealing with Unix, Windows, or some other
-** operating system.  After the following block of preprocess macros,
-** all of SQLITE_OS_UNIX, SQLITE_OS_WIN, and SQLITE_OS_OTHER 
-** will defined to either 1 or 0.  One of the four will be 1.  The other 
-** three will be 0.
+** Attempt to automatically detect the operating system and setup the
+** necessary pre-processor macros for it.
 */
-#if defined(SQLITE_OS_OTHER)
-# if SQLITE_OS_OTHER==1
-#   undef SQLITE_OS_UNIX
-#   define SQLITE_OS_UNIX 0
-#   undef SQLITE_OS_WIN
-#   define SQLITE_OS_WIN 0
-# else
-#   undef SQLITE_OS_OTHER
-# endif
-#endif
-#if !defined(SQLITE_OS_UNIX) && !defined(SQLITE_OS_OTHER)
-# define SQLITE_OS_OTHER 0
-# ifndef SQLITE_OS_WIN
-#   if defined(_WIN32) || defined(WIN32) || defined(__CYGWIN__) || defined(__MINGW32__) || defined(__BORLANDC__)
-#     define SQLITE_OS_WIN 1
-#     define SQLITE_OS_UNIX 0
-#   else
-#     define SQLITE_OS_WIN 0
-#     define SQLITE_OS_UNIX 1
-#  endif
-# else
-#  define SQLITE_OS_UNIX 0
-# endif
-#else
-# ifndef SQLITE_OS_WIN
-#  define SQLITE_OS_WIN 0
-# endif
-#endif
-
-#if SQLITE_OS_WIN
-# include <windows.h>
-#endif
-
-/*
-** Determine if we are dealing with Windows NT.
-**
-** We ought to be able to determine if we are compiling for win98 or winNT
-** using the _WIN32_WINNT macro as follows:
-**
-** #if defined(_WIN32_WINNT)
-** # define SQLITE_OS_WINNT 1
-** #else
-** # define SQLITE_OS_WINNT 0
-** #endif
-**
-** However, vs2005 does not set _WIN32_WINNT by default, as it ought to,
-** so the above test does not work.  We'll just assume that everything is
-** winNT unless the programmer explicitly says otherwise by setting
-** SQLITE_OS_WINNT to 0.
-*/
-#if SQLITE_OS_WIN && !defined(SQLITE_OS_WINNT)
-# define SQLITE_OS_WINNT 1
-#endif
-
-/*
-** Determine if we are dealing with WindowsCE - which has a much
-** reduced API.
-*/
-#if defined(_WIN32_WCE)
-# define SQLITE_OS_WINCE 1
-#else
-# define SQLITE_OS_WINCE 0
-#endif
-
-/*
-** Determine if we are dealing with WinRT, which provides only a subset of
-** the full Win32 API.
-*/
-#if !defined(SQLITE_OS_WINRT)
-# define SQLITE_OS_WINRT 0
-#endif
-
-/*
-** When compiled for WinCE or WinRT, there is no concept of the current
-** directory.
- */
-#if !SQLITE_OS_WINCE && !SQLITE_OS_WINRT
-# define SQLITE_CURDIR 1
-#endif
+#include "os_setup.h"
 
 /* If the SET_FULLSYNC macro is not defined above, then make it
 ** a no-op
@@ -251,7 +170,7 @@ int sqlite3OsInit(void);
 /* 
 ** Functions for accessing sqlite3_file methods 
 */
-int sqlite3OsClose(sqlite3_file*);
+void sqlite3OsClose(sqlite3_file*);
 int sqlite3OsRead(sqlite3_file*, void*, int amt, i64 offset);
 int sqlite3OsWrite(sqlite3_file*, const void*, int amt, i64 offset);
 int sqlite3OsTruncate(sqlite3_file*, i64 size);
@@ -265,10 +184,14 @@ void sqlite3OsFileControlHint(sqlite3_file*,int,void*);
 #define SQLITE_FCNTL_DB_UNCHANGED 0xca093fa0
 int sqlite3OsSectorSize(sqlite3_file *id);
 int sqlite3OsDeviceCharacteristics(sqlite3_file *id);
+#ifndef SQLITE_OMIT_WAL
 int sqlite3OsShmMap(sqlite3_file *,int,int,int,void volatile **);
 int sqlite3OsShmLock(sqlite3_file *id, int, int, int);
 void sqlite3OsShmBarrier(sqlite3_file *id);
 int sqlite3OsShmUnmap(sqlite3_file *id, int);
+#endif /* SQLITE_OMIT_WAL */
+int sqlite3OsFetch(sqlite3_file *id, i64, int, void **);
+int sqlite3OsUnfetch(sqlite3_file *, i64, void *);
 
 
 /* 
@@ -286,6 +209,7 @@ void sqlite3OsDlClose(sqlite3_vfs *, void *);
 #endif /* SQLITE_OMIT_LOAD_EXTENSION */
 int sqlite3OsRandomness(sqlite3_vfs *, int, char *);
 int sqlite3OsSleep(sqlite3_vfs *, int);
+int sqlite3OsGetLastError(sqlite3_vfs*);
 int sqlite3OsCurrentTimeInt64(sqlite3_vfs *, sqlite3_int64*);
 
 /*
@@ -293,6 +217,6 @@ int sqlite3OsCurrentTimeInt64(sqlite3_vfs *, sqlite3_int64*);
 ** sqlite3_malloc() to obtain space for the file-handle structure.
 */
 int sqlite3OsOpenMalloc(sqlite3_vfs *, const char *, sqlite3_file **, int,int*);
-int sqlite3OsCloseFree(sqlite3_file *);
+void sqlite3OsCloseFree(sqlite3_file *);
 
 #endif /* _SQLITE_OS_H_ */
