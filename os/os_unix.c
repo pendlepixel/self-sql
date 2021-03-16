@@ -12,36 +12,47 @@
 **
 ** This file contains the VFS implementation for unix-like operating systems
 ** include Linux, MacOSX, *BSD, QNX, VxWorks, AIX, HPUX, and others.
+** 这个文件包含包括Linux,MacOSX,* BSD,QNX,VxWorks,AIX,HPUX等类unix操作系统的VFS实现。
 **
 ** There are actually several different VFS implementations in this file.
 ** The differences are in the way that file locking is done.  The default
 ** implementation uses Posix Advisory Locks.  Alternative implementations
 ** use flock(), dot-files, various proprietary locking schemas, or simply
 ** skip locking all together.
+** 实际上在这个文件中有几种不同的VFS实现(VFS的作用就是采用标准的Unix系统调
+** 用读写位于不同物理介质上的不同文件系统。VFS是一个可以让open()、read()、write()
+** 等系统调用不用关心底层的存储介质和文件系统类型就可以工作的粘合层。)
+** 差异在于文件加锁的方式。默认的实现是使用Posix咨询锁。替代实现使用flock(),dot文件,
+** 各种专有锁定模式,或者只是跳过锁定在一起.
 **
 ** This source file is organized into divisions where the logic for various
 ** subfunctions is contained within the appropriate division.  PLEASE
 ** KEEP THE STRUCTURE OF THIS FILE INTACT.  New code should be placed
 ** in the correct division and should be clearly labeled.
+** 这些源文件组成了包含了各种逻辑子函数的分区.请保持这个文件结构的完整
+** 新代码应放置在正确的分区,并且都应有明确的标示。
 **
 ** The layout of divisions is as follows:
 **
-**   *  General-purpose declarations and utility functions.
-**   *  Unique file ID logic used by VxWorks.
-**   *  Various locking primitive implementations (all except proxy locking):
-**      + for Posix Advisory Locks
-**      + for no-op locks
-**      + for dot-file locks
-**      + for flock() locking
-**      + for named semaphore locks (VxWorks only)
-**      + for AFP filesystem locks (MacOSX only)
-**   *  sqlite3_file methods not associated with locking.
+**   *  General-purpose declarations and utility functions.  //通用的声明和实用功能
+**   *  Unique file ID logic used by VxWorks.  //VxWorks所使用的唯一的文件ID逻辑
+**   *  Various locking primitive implementations (all except proxy locking):  //锁定原语的实现（除了代理锁定）
+**      + for Posix Advisory Locks  //Posix咨询锁
+**      + for no-op locks  //无操作锁
+**      + for dot-file locks  //点文件锁
+**      + for flock() locking  //聚集锁
+**      + for named semaphore locks (VxWorks only)  //命名信号锁（只存在于VxWorks）
+**      + for AFP filesystem locks (MacOSX only)  //AFP系统文件锁（只存在于MacOSX）
+**   *  sqlite3_file methods not associated with locking.  //sqlite_file方法和加锁没有关系
 **   *  Definitions of sqlite3_io_methods objects for all locking
 **      methods plus "finder" functions for each locking method.
-**   *  sqlite3_vfs method implementations.
+**   //sqlite3_io_methods对象的定义为所有锁定方法增加"finder"功能
+**   *  sqlite3_vfs method implementations.  //sqlite3_vfs方法实现
 **   *  Locking primitives for the proxy uber-locking-method. (MacOSX only)
+**   //proxy uber-locking-method的锁定原语（只在MacOSX上有）
 **   *  Definitions of sqlite3_vfs objects for all locking methods
 **      plus implementations of sqlite3_os_init() and sqlite3_os_end().
+**   //为所有加锁方法定义了sqlite3_vfs对象，增加了sqlite3_os_init() 和 sqlite3_os_end()的实现.
 */
 #include "sqliteInt.h"
 #if SQLITE_OS_UNIX              /* This file is used on unix only */
