@@ -54,11 +54,11 @@
 **      plus implementations of sqlite3_os_init() and sqlite3_os_end().
 **   //为所有加锁方法定义了sqlite3_vfs对象，增加了sqlite3_os_init() 和 sqlite3_os_end()的实现.
 */
-#include "sqliteInt.h"
+#include "../sqliteInt.h"
 #if SQLITE_OS_UNIX              /* This file is used on unix only */
 
 /*
-** There are various methods for file locking used for concurrency
+** There are various methods for file locking used for concurrency  //多种用于并发控制的文件加锁的方法
 ** control:
 **
 **   1. POSIX locking (the default),
@@ -73,6 +73,8 @@
 ** is defined to 1.  The SQLITE_ENABLE_LOCKING_STYLE also enables automatic
 ** selection of the appropriate locking style based on the filesystem
 ** where the database is located.  
+** 4、5、7只可用定义为1的SQLITE_ENABLE_LOCKING_STYLE。SQLITE_ENABLE_LOCKING_STYLE
+** 还支持基于数据库所在的文件系统自动选择适当的加锁风格。
 */
 #if !defined(SQLITE_ENABLE_LOCKING_STYLE)
 #  if defined(__APPLE__)
@@ -159,12 +161,13 @@
 #endif
 
 /*
-** Allowed values of unixFile.fsFlags
+** Allowed values of unixFile.fsFlags  //unixFile.fsFlags允许的值
 */
 #define SQLITE_FSFLAGS_IS_MSDOS     0x1
 
 /*
 ** If we are to be thread-safe, include the pthreads header.
+** //如果希望线程安全，包裹线程头部
 */
 #if SQLITE_THREADSAFE
 # include <pthread.h>
@@ -172,6 +175,7 @@
 
 /*
 ** Default permissions when creating a new file
+** //创建一个新文件时的默认权限
 */
 #ifndef SQLITE_DEFAULT_FILE_PERMISSIONS
 # define SQLITE_DEFAULT_FILE_PERMISSIONS 0644
@@ -179,6 +183,7 @@
 
 /*
 ** Default permissions when creating auto proxy dir
+** //创建自动代理路径时的默认权限
 */
 #ifndef SQLITE_DEFAULT_PROXYDIR_PERMISSIONS
 # define SQLITE_DEFAULT_PROXYDIR_PERMISSIONS 0755
@@ -186,11 +191,13 @@
 
 /*
 ** Maximum supported path-length.
+** //路径长度的最大支持值
 */
 #define MAX_PATHNAME 512
 
 /*
 ** Maximum supported symbolic links
+** //最大支持的软链接数
 */
 #define SQLITE_MAX_SYMLINKS 100
 
@@ -201,10 +208,12 @@
 /*
 ** Only set the lastErrno if the error code is a real error and not 
 ** a normal expected return code of SQLITE_BUSY or SQLITE_OK
+** //如果错误代码是一个真正的错误，而不是一个正常的预期的SQLITE_BUSY或SQLITE_OK返回代码
+** //则，只能设置lastErrno
 */
 #define IS_LOCK_ERROR(x)  ((x != SQLITE_OK) && (x != SQLITE_BUSY))
 
-/* Forward references */
+/* Forward references */  //前向引用
 typedef struct unixShm unixShm;               /* Connection shared memory */
 typedef struct unixShmNode unixShmNode;       /* Shared memory instance */
 typedef struct unixInodeInfo unixInodeInfo;   /* An i-node */
@@ -215,31 +224,34 @@ typedef struct UnixUnusedFd UnixUnusedFd;     /* An unused file descriptor */
 ** cannot be closed immediately. In these cases, instances of the following
 ** structure are used to store the file descriptor while waiting for an
 ** opportunity to either close or reuse it.
+** //有时，sqlite关闭文件句柄后，不能立即关闭文件描述符。在这些情况下，下面的结构实例用来
+** //存储文件描述符，同时等待机会，要么关闭或重用它。
 */
 struct UnixUnusedFd {
-  int fd;                   /* File descriptor to close */
-  int flags;                /* Flags this file descriptor was opened with */
-  UnixUnusedFd *pNext;      /* Next unused file descriptor on same file */
+  int fd;                   /* File descriptor to close */  //要关闭的文件描述符
+  int flags;                /* Flags this file descriptor was opened with */  //打开此文件描述符的标志
+  UnixUnusedFd *pNext;      /* Next unused file descriptor on same file */  //同一文件的下一个未使用的文件描述符
 };
 
 /*
 ** The unixFile structure is subclass of sqlite3_file specific to the unix
 ** VFS implementations.
+** //unixFile结构体是sqlite3_file特定于unix VFS的子类实现
 */
 typedef struct unixFile unixFile;
 struct unixFile {
-  sqlite3_io_methods const *pMethod;  /* Always the first entry */
-  sqlite3_vfs *pVfs;                  /* The VFS that created this unixFile */
-  unixInodeInfo *pInode;              /* Info about locks on this inode */
-  int h;                              /* The file descriptor */
-  unsigned char eFileLock;            /* The type of lock held on this fd */
-  unsigned short int ctrlFlags;       /* Behavioral bits.  UNIXFILE_* flags */
-  int lastErrno;                      /* The unix errno from last I/O error */
-  void *lockingContext;               /* Locking style specific state */
-  UnixUnusedFd *pPreallocatedUnused;  /* Pre-allocated UnixUnusedFd */
-  const char *zPath;                  /* Name of the file */
-  unixShm *pShm;                      /* Shared memory segment information */
-  int szChunk;                        /* Configured by FCNTL_CHUNK_SIZE */
+  sqlite3_io_methods const *pMethod;  /* Always the first entry */  //总是第一个进入
+  sqlite3_vfs *pVfs;                  /* The VFS that created this unixFile */  //创建这个unixFile的VFS
+  unixInodeInfo *pInode;              /* Info about locks on this inode */  //关于这个i节点上的锁的消息
+  int h;                              /* The file descriptor */  //文件描述符
+  unsigned char eFileLock;            /* The type of lock held on this fd */  //fd（上面定义的文件描述符）上加锁的类型
+  unsigned short int ctrlFlags;       /* Behavioral bits.  UNIXFILE_* flags */  //行为位
+  int lastErrno;                      /* The unix errno from last I/O error */  //最后一个输入/删除错误的unix错误
+  void *lockingContext;               /* Locking style specific state */  //加锁类型特定的状态
+  UnixUnusedFd *pPreallocatedUnused;  /* Pre-allocated UnixUnusedFd */  //预分配的unixunusedFd
+  const char *zPath;                  /* Name of the file */  //文件名
+  unixShm *pShm;                      /* Shared memory segment information */  //共享内存段的信息  
+  int szChunk;                        /* Configured by FCNTL_CHUNK_SIZE */  //由FCNTL_CHUNK_SIZE配置
 #if SQLITE_MAX_MMAP_SIZE>0
   int nFetchOut;                      /* Number of outstanding xFetch refs */
   sqlite3_int64 mmapSize;             /* Usable size of mapping at pMapRegion */
@@ -250,16 +262,16 @@ struct unixFile {
   int sectorSize;                     /* Device sector size */
   int deviceCharacteristics;          /* Precomputed device characteristics */
 #if SQLITE_ENABLE_LOCKING_STYLE
-  int openFlags;                      /* The flags specified at open() */
+  int openFlags;                      /* The flags specified at open() */  //指定的open()标志
 #endif
 #if SQLITE_ENABLE_LOCKING_STYLE || defined(__APPLE__)
-  unsigned fsFlags;                   /* cached details from statfs() */
+  unsigned fsFlags;                   /* cached details from statfs() */  //statfs()的缓存的详细信息
 #endif
 #ifdef SQLITE_ENABLE_SETLK_TIMEOUT
   unsigned iBusyTimeout;              /* Wait this many millisec on locks */
 #endif
 #if OS_VXWORKS
-  struct vxworksFileId *pId;          /* Unique file ID */
+  struct vxworksFileId *pId;          /* Unique file ID */  //唯一的文件ID
 #endif
 #ifdef SQLITE_DEBUG
   /* The next group of variables are used to track whether or not the
@@ -268,16 +280,19 @@ struct unixFile {
   ** occur if a file is updated without also updating the transaction
   ** counter.  This test is made to avoid new problems similar to the
   ** one described by ticket #3584. 
+  ** //下一组变量用来跟踪数据库文件的24-27字节的事务计数器在数据库其他部分发生变化是否更新。如果一个文件
+  ** //更新了但没有更新事务计数器，断言故障就会发生。进行测测试，是为了避免出现新的类似于标签#384描述的问题
   */
-  unsigned char transCntrChng;   /* True if the transaction counter changed */
-  unsigned char dbUpdate;        /* True if any part of database file changed */
-  unsigned char inNormalWrite;   /* True if in a normal write operation */
+  unsigned char transCntrChng;   /* True if the transaction counter changed */  //如果事物计数器更改则为True
+  unsigned char dbUpdate;        /* True if any part of database file changed */  //如果数据库文件的任何部分发生了改变则为True
+  unsigned char inNormalWrite;   /* True if in a normal write operation */  //如果在一个正常的写操作内则为True
 
 #endif
 
 #ifdef SQLITE_TEST
   /* In test mode, increase the size of this structure a bit so that 
   ** it is larger than the struct CrashFile defined in test6.c.
+  ** //在测试模式下，增加一点此结构的大小，让它大于CrashFile在test6.c中定义的结构。
   */
   char aPadding[32];
 #endif
@@ -291,27 +306,28 @@ static pid_t randomnessPid = 0;
 
 /*
 ** Allowed values for the unixFile.ctrlFlags bitmask:
+** //unixFile.ctrlFlags位掩码允许的值
 */
-#define UNIXFILE_EXCL        0x01     /* Connections from one process only */
-#define UNIXFILE_RDONLY      0x02     /* Connection is read only */
-#define UNIXFILE_PERSIST_WAL 0x04     /* Persistent WAL mode */
+#define UNIXFILE_EXCL        0x01     /* Connections from one process only */  //仅来自一个进程的连接
+#define UNIXFILE_RDONLY      0x02     /* Connection is read only */  //仅读连接
+#define UNIXFILE_PERSIST_WAL 0x04     /* Persistent WAL mode */  //持续的WAL模式
 #ifndef SQLITE_DISABLE_DIRSYNC
-# define UNIXFILE_DIRSYNC    0x08     /* Directory sync needed */
+# define UNIXFILE_DIRSYNC    0x08     /* Directory sync needed */  //所需的目录同步
 #else
 # define UNIXFILE_DIRSYNC    0x00
 #endif
 #define UNIXFILE_PSOW        0x10     /* SQLITE_IOCAP_POWERSAFE_OVERWRITE */
-#define UNIXFILE_DELETE      0x20     /* Delete on close */
-#define UNIXFILE_URI         0x40     /* Filename might have query parameters */
-#define UNIXFILE_NOLOCK      0x80     /* Do no file locking */
+#define UNIXFILE_DELETE      0x20     /* Delete on close */  //关闭后删除
+#define UNIXFILE_URI         0x40     /* Filename might have query parameters */  //文件名可能有查询参数
+#define UNIXFILE_NOLOCK      0x80     /* Do no file locking */   //没有文件锁定
 
 /*
-** Include code that is common to all os_*.c files
+** Include code that is common to all os_*.c files  //包含了所有os_*.c文件通用的代码
 */
 #include "os_common.h"
 
 /*
-** Define various macros that are missing from some systems.
+** Define various macros that are missing from some systems.  //定义了许多系统都缺少的各种宏
 */
 #ifndef O_LARGEFILE
 # define O_LARGEFILE 0
@@ -330,6 +346,7 @@ static pid_t randomnessPid = 0;
 /*
 ** The threadid macro resolves to the thread-id or to 0.  Used for
 ** testing and debugging only.
+** //threadid宏解析到线程id或0，只用于测试和调试
 */
 #if SQLITE_THREADSAFE
 #define threadid pthread_self()
