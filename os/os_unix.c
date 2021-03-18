@@ -58,6 +58,7 @@
 #if SQLITE_OS_UNIX              /* This file is used on unix only */
 
 #define OS_VXWORKS 0
+#define __APPLE__ 0
 
 /*
 ** There are various methods for file locking used for concurrency  //多种用于并发控制的文件加锁的方法
@@ -1121,6 +1122,8 @@ static void vxworksReleaseFileId(struct vxworksFileId *pId){
 ** among competing threads of the same process.  POSIX locks will work fine
 ** to synchronize access for threads in separate processes, but not
 ** threads within the same process.
+** //这意味着我们不能使用POSIX锁来同步竞争同一进程的线程之间的文件访问。POSIX锁可以同步不同进程的线程访问，
+** //但是不能同步同一进程的线程访问
 **
 ** To work around the problem, SQLite has to manage file locks internally
 ** on its own.  Whenever a new database is opened, we have to find the
@@ -1130,10 +1133,14 @@ static void vxworksReleaseFileId(struct vxworksFileId *pId){
 ** created or removed, we have to look at our own internal record of the
 ** locks to see if another thread has previously set a lock on that same
 ** inode.
+** //若想解决这一问题，SQLITE必须在其内部管理文件锁定。每当打开一个新的数据库，我们必须找到特定的数据库文件的i节点
+** //（这个i节点由st_dev和st_ino字段的统计结构的fstat()函数填写，并且检查这个锁已经存在在这个i节点上了。）
+** //当创建或者删除锁，我们要看看我们自己内部的锁记录，看看是否有另一个线程先在相同的i节点上设置了锁。
 **
 ** (Aside: The use of inode numbers as unique IDs does not work on VxWorks.
 ** For VxWorks, we have to use the alternative unique ID system based on
 ** canonical filename and implemented in the previous division.)
+** //顺便说句，不能再VxWorks上使用i节点编号作为唯一的ID。对于VxWorks，我们必须使用基于规范的文件名，并且在原先的部分实施。
 **
 ** The sqlite3_file structure for POSIX is no longer just an integer file
 ** descriptor.  It is now a structure that holds the integer file
@@ -1145,13 +1152,20 @@ static void vxworksReleaseFileId(struct vxworksFileId *pId){
 ** field that tells us its internal lock status.  cnt==0 means the
 ** file is unlocked.  cnt==-1 means the file has an exclusive lock.
 ** cnt>0 means there are cnt shared locks on the file.
+** //POSIX的sqlite3_file结构不再仅仅是一个整型的文件描述符。它现在是一个包含整型的文件描述符和指向描述内部相应的
+** //i节点的锁的结构的指针。每个i节点有一个锁结构，所以如果同意inode打开两次，两个unixFile结构指向同一个锁结构。
+** //锁定结构保持引用计数（因此，我们将知道什么时候删除它）并且“cnt”字段告诉我们其内部锁状态。
+** //cnt==0意味着文件没有加锁。cnt=-1意味着文件有一个排它锁。cnt>0意味着该文件上有cnt共享锁。
 **
 ** Any attempt to lock or unlock a file first checks the locking
 ** structure.  The fcntl() system call is only invoked to set a 
 ** POSIX lock if the internal lock structure transitions between
 ** a locked and an unlocked state.
+** //任何企图要锁定或者解锁文件首先检查锁结构。如果内部锁结构在锁定和解除锁定的状态之间转换,
+** //才会调用fcntl()系统调用设置POSIX锁。
 **
 ** But wait:  there are yet more problems with POSIX advisory locks.
+** //POSIX咨询锁还是存在一些问题.
 **
 ** If you close a file descriptor that points to a file that has locks,
 ** all locks on that file that are owned by the current process are
@@ -1163,8 +1177,13 @@ static void vxworksReleaseFileId(struct vxworksFileId *pId){
 ** The unixInodeInfo structure keeps a list of file descriptors that need to
 ** be closed and that list is walked (and cleared) when the last lock
 ** clears.
+** //如果你关闭一个指向已锁定的文件的文件描述符，由当前进程对该文件的设置的所有锁都会释放。
+** //为了解决这个问题，每个unixInodeInfo对象维护在该i节点上挂起的锁的数目的计数。
+** //当试图关闭一个unixFile，如果在该持有锁的i节点上有其他unixFile打开，close()关闭文件描述符的调用将推迟,
+** //直到所有的锁都清除。unixInodeInfo结构体保存一个需要关闭的文件描述符列表，并且最有一个锁清除时该列表也将移除（清除）。
 **
 ** Yet another problem:  LinuxThreads do not play well with posix locks.
+** //另一个问题，LinuxThreads不能与posix locks很好地工作
 **
 ** Many older versions of linux use the LinuxThreads library which is
 ** not posix compliant.  Under LinuxThreads, a lock created by thread
@@ -1177,22 +1196,30 @@ static void vxworksReleaseFileId(struct vxworksFileId *pId){
 ** compile-time whether or not thread A can override locks on thread B.
 ** One has to do a run-time check to discover the behavior of the
 ** current process.
+** //许多旧版本的linux使用LinuxThreads库是不兼容posix的。在LinuxThreads下，线程A创建的锁不能由线程B修改或者重写。
+** //只有线程A可以修改这个锁。如果应用程序在Linux上使用新的本机Posix线程库（NPTL），锁定行为是正确的。
+** //使用NPTL线程A创建的锁可以重写线程B中的锁。但是没有办法知道在编译时使用的是哪一种线程库。
+** //所以没有办法知道在编译时线程A是否可以重写线程B上的锁。必须在运行时检查发现当前进程的行为。
 **
 ** SQLite used to support LinuxThreads.  But support for LinuxThreads
 ** was dropped beginning with version 3.7.0.  SQLite will still work with
 ** LinuxThreads provided that (1) there is no more than one connection 
 ** per database file in the same process and (2) database connections
 ** do not move across threads.
+** //SQLTIE过去支持Linux线程。但从3.7.0版本开始就删除了对Linux线程的支持，SQLTIE只规定
+** //(1)在同一进程中每个数据库文件没有超过一个以上的连接，并且
+** //(2)数据库连接不会跨线程移动的情况下，依然会予以支持
 */
 
 /*
 ** An instance of the following structure serves as the key used
 ** to locate a particular unixInodeInfo object.
+** //以下结构体的一个实例用于查找一个特定的unixInodeInfo对象的键。
 */
 struct unixFileId {
-  dev_t dev;                  /* Device number */
+  dev_t dev;                  /* Device number */  //设备号
 #if OS_VXWORKS
-  struct vxworksFileId *pId;  /* Unique file ID for vxworks. */
+  struct vxworksFileId *pId;  /* Unique file ID for vxworks. */  //用于vxworks的唯一的文件ID
 #else
   /* We are told that some versions of Android contain a bug that
   ** sizes ino_t at only 32-bits instead of 64-bits. (See
@@ -1201,17 +1228,20 @@ struct unixFileId {
   ** On small machines that only have 32-bit inodes, this wastes 4 bytes,
   ** but that should not be a big deal. */
   /* WAS:  ino_t ino;   */
-  u64 ino;                   /* Inode number */
+  u64 ino;                   /* Inode number */  //i节点数目
 #endif
 };
 
 /*
 ** An instance of the following structure is allocated for each open
 ** inode.
+** //下面结构体的每一个实例分配给每个打开的i节点。
 **
 ** A single inode can have multiple file descriptors, so each unixFile
 ** structure contains a pointer to an instance of this object and this
 ** object keeps a count of the number of unixFile pointing to it.
+** //单一的i节点可以由多个文件描述符，因此每个unixFile结构包含一个指针，指向该对象的一个实例，
+** //此对象保持unixFile指向它的数目的计数。
 **
 ** Mutex rules:
 **
@@ -1231,23 +1261,23 @@ struct unixFileId {
 ** and pLockMutex are needed, then unixBigLock must be acquired first.
 */
 struct unixInodeInfo {
-  struct unixFileId fileId;       /* The lookup key */
-  sqlite3_mutex *pLockMutex;      /* Hold this mutex for... */
-  int nShared;                      /* Number of SHARED locks held */
-  int nLock;                        /* Number of outstanding file locks */
+  struct unixFileId fileId;       /* The lookup key */  //查找键
+  sqlite3_mutex *pLockMutex;      /* Hold this mutex for... */  
+  int nShared;                      /* Number of SHARED locks held */  //持有共享锁的数目
+  int nLock;                        /* Number of outstanding file locks */  //未完成的文件锁定的数目
   unsigned char eFileLock;          /* One of SHARED_LOCK, RESERVED_LOCK etc. */
-  unsigned char bProcessLock;       /* An exclusive process lock is held */
-  UnixUnusedFd *pUnused;            /* Unused file descriptors to close */
-  int nRef;                       /* Number of pointers to this structure */
-  unixShmNode *pShmNode;          /* Shared memory associated with this inode */
-  unixInodeInfo *pNext;           /* List of all unixInodeInfo objects */
-  unixInodeInfo *pPrev;           /*    .... doubly linked */
+  unsigned char bProcessLock;       /* An exclusive process lock is held */  //独占进程锁
+  UnixUnusedFd *pUnused;            /* Unused file descriptors to close */  //关闭未使用的文件描述符
+  int nRef;                       /* Number of pointers to this structure */  //指向这个结构体的指针数目
+  unixShmNode *pShmNode;          /* Shared memory associated with this inode */  //与这个i节点有关的共享内存
+  unixInodeInfo *pNext;           /* List of all unixInodeInfo objects */  //所有的unixInodeInfo对象的列表
+  unixInodeInfo *pPrev;           /*    .... doubly linked */  //双重链接
 #if SQLITE_ENABLE_LOCKING_STYLE
-  unsigned long long sharedByte;  /* for AFP simulated shared lock */
+  unsigned long long sharedByte;  /* for AFP simulated shared lock */  //用于模拟APF共享锁
 #endif
 #if OS_VXWORKS
-  sem_t *pSem;                    /* Named POSIX semaphore */
-  char aSemName[MAX_PATHNAME+2];  /* Name of that semaphore */
+  sem_t *pSem;                    /* Named POSIX semaphore */  //命名的POSIX信号量
+  char aSemName[MAX_PATHNAME+2];  /* Name of that semaphore */  //该信号量的名称
 #endif
 };
 
@@ -1255,6 +1285,7 @@ struct unixInodeInfo {
 ** A lists of all unixInodeInfo objects.
 **
 ** Must hold unixBigLock in order to read or write this variable.
+** //unixInodeInfo的所有对象的列表，为了读或者写这个变量，必须有unixBigLock
 */
 static unixInodeInfo *inodeList = 0;  /* All unixInodeInfo objects */
 
@@ -1278,31 +1309,38 @@ int unixFileMutexNotheld(unixFile *pFile){
 **
 ** This function - unixLogErrorAtLine(), is only ever called via the macro
 ** unixLogError().
+** //这个unixLogErrorAtLine()函数永远只能通过宏定义的unixLogError()函数调用
 **
 ** It is invoked after an error occurs in an OS function and errno has been
 ** set. It logs a message using sqlite3_log() containing the current value of
 ** errno and, if possible, the human-readable equivalent from strerror() or
 ** strerror_r().
+** //在操作系统函数出现错误并且错误被设定之后调用它。它使用sqlite3_log()记录一条消息，消息包含当前errno的值，
+** //如果可能，任何读的等效来自与strerror()或者strerror_r()
 **
 ** The first argument passed to the macro should be the error code that
 ** will be returned to SQLite (e.g. SQLITE_IOERR_DELETE, SQLITE_CANTOPEN). 
 ** The two subsequent arguments should be the name of the OS function that
 ** failed (e.g. "unlink", "open") and the associated file-system path,
 ** if any.
+** //传递给宏的第一个参数应是将被返回到SQLITE的（例如SQLITE_IOERR_DELETE, SQLITE_CANTOPEN）错误代码。
+** //随后的两个参数应该是失败的操作系统函数名称（例如“取消链接”，“打开”）,以及相关的系统文件路径。
 */
 #define unixLogError(a,b,c)     unixLogErrorAtLine(a,b,c,__LINE__)
 static int unixLogErrorAtLine(
-  int errcode,                    /* SQLite error code */
-  const char *zFunc,              /* Name of OS function that failed */
-  const char *zPath,              /* File path associated with error */
-  int iLine                       /* Source line number where error occurred */
+  int errcode,                    /* SQLite error code */  //SQLITE错误代码
+  const char *zFunc,              /* Name of OS function that failed */  //失败的操作系统函数名称
+  const char *zPath,              /* File path associated with error */  //错误的文件路径关联
+  int iLine                       /* Source line number where error occurred */  //发生错误的位置的源代码行号
 ){
-  char *zErr;                     /* Message from strerror() or equivalent */
-  int iErrno = errno;             /* Saved syscall error number */
+  char *zErr;                     /* Message from strerror() or equivalent */  //strerror()的或与之等效的消息
+  int iErrno = errno;             /* Saved syscall error number */  //保存系统调用错误号
 
   /* If this is not a threadsafe build (SQLITE_THREADSAFE==0), then use
   ** the strerror() function to obtain the human-readable error message
   ** equivalent to errno. Otherwise, use strerror_r().
+  ** //如果这不是一个线程安全构建(SQLITE_THREADSAFE == 0)，则使用strerror()函数来获得相当于errno的人可读的错误消息。
+  ** //否则，使用strerror_r()。
   */ 
 #if SQLITE_THREADSAFE && defined(HAVE_STRERROR_R)
   char aErr[80];
@@ -1315,11 +1353,16 @@ static int unixLogErrorAtLine(
   ** may point to aErr[], or it may point to some static storage somewhere. 
   ** Otherwise, assume that the system provides the POSIX version of 
   ** strerror_r(), which always writes an error message into aErr[].
+  ** //如果定义了STRERROR_R_CHAR_P（由autoconf脚本设置）或__USE_GNU,
+  ** //假定该系统提供的GNU版本的strerror_r()它返回一个指向包含错误信息的缓冲区，这个指针可以指向aErr[],
+  ** //或者指向一些静态存储区域。否则，假设该系统提供的POSIX版本的strerror_r()，总是将错误信息写入到aErr[].
   **
   ** If the code incorrectly assumes that it is the POSIX version that is
   ** available, the error message will often be an empty string. Not a
   ** huge problem. Incorrectly concluding that the GNU version is available 
   ** could lead to a segfault though.
+  ** //如果代码错误地假定它是可用的POSIX版本，错误消息通常会是一个空字符串。这不是一个大问题。
+  ** //虽然不正确地结束GNU版本可用可能导致分段错误。
   */
 #if defined(STRERROR_R_CHAR_P) || defined(__USE_GNU)
   zErr = 
@@ -1327,10 +1370,10 @@ static int unixLogErrorAtLine(
   strerror_r(iErrno, aErr, sizeof(aErr)-1);
 
 #elif SQLITE_THREADSAFE
-  /* This is a threadsafe build, but strerror_r() is not available. */
+  /* This is a threadsafe build, but strerror_r() is not available. */  //这是一个线程安全的构建，但是strerror_r()是不可用的
   zErr = "";
 #else
-  /* Non-threadsafe build, use strerror(). */
+  /* Non-threadsafe build, use strerror(). */  //非线程安全的构建，使用strerror()
   zErr = strerror(iErrno);
 #endif
 
@@ -1345,16 +1388,21 @@ static int unixLogErrorAtLine(
 
 /*
 ** Close a file descriptor.
+** //关闭一个文件描述符
 **
 ** We assume that close() almost always works, since it is only in a
 ** very sick application or on a very sick platform that it might fail.
 ** If it does fail, simply leak the file descriptor, but do log the
 ** error.
+** //因为只在一个非常恶心的应用程序或者在一个非常恶心的平台，
+** //我们假设close()几乎总是工作的。如果他失败了，除了记录错误之外，仅仅泄露文件描述符
 **
 ** Note that it is not safe to retry close() after EINTR since the
 ** file descriptor might have already been reused by another thread.
 ** So we don't even try to recover from an EINTR.  Just log the error
 ** and move on.
+** //需要注意的是，由于文件描述符可能已经被另一个线程重新使用，在EINTR后重试
+** //close()是不安全的。所以，我们甚至不尝试从EINTR恢复，只要记录错误然后继续执行
 */
 static void robust_close(unixFile *pFile, int h, int lineno){
   if( osClose(h) ){
@@ -1373,6 +1421,7 @@ static void storeLastErrno(unixFile *pFile, int error){
 
 /*
 ** Close all file descriptors accumuated in the unixInodeInfo->pUnused list.
+** //关闭所有存放在unixInodeInfo->pUnused列表中的文件描述符
 */ 
 static void closePendingFds(unixFile *pFile){
   unixInodeInfo *pInode = pFile->pInode;
@@ -1389,9 +1438,11 @@ static void closePendingFds(unixFile *pFile){
 
 /*
 ** Release a unixInodeInfo structure previously allocated by findInodeInfo().
+** //释放之前findInodeInfo()分配一个unixInodeInfo结构
 **
 ** The global mutex must be held when this routine is called, but the mutex
 ** on the inode being deleted must NOT be held.
+** //当这个函数调用时，必须使用unixEnterMutex()函数输入的互斥量
 */
 static void releaseInodeInfo(unixFile *pFile){
   unixInodeInfo *pInode = pFile->pInode;
@@ -1425,25 +1476,29 @@ static void releaseInodeInfo(unixFile *pFile){
 ** Given a file descriptor, locate the unixInodeInfo object that
 ** describes that file descriptor.  Create a new one if necessary.  The
 ** return value might be uninitialized if an error occurs.
+** //给定一个文件描述符，定位unixInodeInfo对象描述文件描述符。在必要时创建一个新的。如果出现错误，返回值可能是未初始化的。
 **
 ** The global mutex must held when calling this routine.
+** //当这个函数被调用时，必须使用unixEnterMutex()函数输入的互斥量
 **
 ** Return an appropriate error code.
+** //返回相应的错误代码
 */
 static int findInodeInfo(
-  unixFile *pFile,               /* Unix file with file desc used in the key */
-  unixInodeInfo **ppInode        /* Return the unixInodeInfo object here */
+  unixFile *pFile,               /* Unix file with file desc used in the key */  //降序排列的Unix文件使用的键
+  unixInodeInfo **ppInode        /* Return the unixInodeInfo object here */  //返回unixInodeInfo对象
 ){
-  int rc;                        /* System call return code */
-  int fd;                        /* The file descriptor for pFile */
-  struct unixFileId fileId;      /* Lookup key for the unixInodeInfo */
-  struct stat statbuf;           /* Low-level file information */
-  unixInodeInfo *pInode = 0;     /* Candidate unixInodeInfo object */
+  int rc;                        /* System call return code */  //系统调用返回代码
+  int fd;                        /* The file descriptor for pFile */  //pFile的文件描述符
+  struct unixFileId fileId;      /* Lookup key for the unixInodeInfo */  //unixInodeInfo的查找键
+  struct stat statbuf;           /* Low-level file information */  //底层文件信息
+  unixInodeInfo *pInode = 0;     /* Candidate unixInodeInfo object */  //候选的unixInodeInfo对象
 
   assert( unixMutexHeld() );
 
   /* Get low-level information about the file that we can used to
   ** create a unique name for the file.
+  ** //获得底层文件信息，我们可以用来为该文件创建一个唯一的名称。
   */
   fd = pFile->h;
   rc = osFstat(fd, &statbuf);
@@ -1575,6 +1630,8 @@ static void verifyDbFile(unixFile *pFile){
 ** file by this or any other process. If such a lock is held, set *pResOut
 ** to a non-zero value otherwise *pResOut is set to zero.  The return value
 ** is set to SQLITE_OK unless an I/O error occurs during lock checking.
+** //这个例程检查这个进程或其他进程指定的文件是否持有保留锁。如果持有这样的锁，
+** //设置*pResOut为非零值，否则设置为0,返回值设置为SQLITE_OK，除非在锁定期间出现I/O错误。
 */
 static int unixCheckReservedLock(sqlite3_file *id, int *pResOut){
   int rc = SQLITE_OK;
@@ -1587,12 +1644,13 @@ static int unixCheckReservedLock(sqlite3_file *id, int *pResOut){
   assert( pFile->eFileLock<=SHARED_LOCK );
   sqlite3_mutex_enter(pFile->pInode->pLockMutex);
 
-  /* Check if a thread in this process holds such a lock */
+  /* Check if a thread in this process holds such a lock */  //检查是否这一进程中的线程持有此类锁
   if( pFile->pInode->eFileLock>SHARED_LOCK ){
     reserved = 1;
   }
 
   /* Otherwise see if some other process holds it.
+  ** //否则，看看是否一些其他进程持有它
   */
 #ifndef __DJGPP__
   if( !reserved && !pFile->pInode->bProcessLock ){
@@ -1617,7 +1675,7 @@ static int unixCheckReservedLock(sqlite3_file *id, int *pResOut){
   return rc;
 }
 
-/* Forward declaration*/
+/* Forward declaration*/  //前向声明
 static int unixSleep(sqlite3_vfs*,int);
 
 /*
@@ -1661,6 +1719,7 @@ static int osSetPosixAdvisoryLock(
 /*
 ** Attempt to set a system-lock on the file pFile.  The lock is 
 ** described by pLock.
+** //试图在文件pFile设置一个系统锁，这个锁由pLock描述
 **
 ** If the pFile was opened read/write from unix-excl, then the only lock
 ** ever obtained is an exclusive lock, and it is obtained exactly once
@@ -1669,13 +1728,18 @@ static int osSetPosixAdvisoryLock(
 ** in order to coordinate access between separate database connections
 ** within this process, but all of that is handled in memory and the
 ** operating system does not participate.
+** //如果pFile是从unix-excl打开读/写的，那么只有曾经获得的排它锁，这是第一次获得试图得到的任何的锁。
+** //所有后续系统锁定操作成为空操作。锁定操作仍然发生在内部，以便协调在这一进程中的单独的数据库连接之间的访问,
+** //但这一切都是在内存中处理，操作系统并不参与。
 **
 ** This function is a pass-through to fcntl(F_SETLK) if pFile is using
 ** any VFS other than "unix-excl" or if pFile is opened on "unix-excl"
 ** and is read-only.
+** //这个函数传递到fcntl（F_SETLK），如果pFile使用了除了“unix-excl”之外的任何VFS，或者pFile在“unix-excl”上时打开的并且是只读的。
 **
 ** Zero is returned if the call completes successfully, or -1 if a call
 ** to fcntl() fails. In this case, errno is set appropriately (by fcntl()).
+** //如果调用成功完成，返回零，或-1，如果调用fcnl()失败，在这种情况下，errno是设置正确的(通过fcntl())。
 */
 static int unixFileLock(unixFile *pFile, struct flock *pLock){
   int rc;
