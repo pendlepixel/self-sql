@@ -57,6 +57,8 @@
 #include "../sqliteInt.h"
 #if SQLITE_OS_UNIX              /* This file is used on unix only */
 
+#define OS_VXWORKS 0
+
 /*
 ** There are various methods for file locking used for concurrency  //多种用于并发控制的文件加锁的方法
 ** control:
@@ -391,9 +393,12 @@ static pid_t randomnessPid = 0;
 ** Different Unix systems declare open() in different ways.  Same use
 ** open(const char*,int,mode_t).  Others use open(const char*,int,...).
 ** The difference is important when using a pointer to the function.
+** //不同的unix系统已不同的方式声明open().同样适用open(const char*, int mode_t).
+** //其他使用open(const char*, int, ...)。当使用指向函数的指针时，这些区别是很重要的。
 **
 ** The safest way to deal with the problem is to always use this wrapper
 ** which always has the same well-defined interface.
+** //处理这个问题最安全的方式是始终使用这个总是具有相同的定义良好的接口的封装
 */
 static int posixOpen(const char *zFile, int flags, int mode){
   return open(zFile, flags, mode);
@@ -408,11 +413,13 @@ static int unixGetpagesize(void);
 ** they may be overridden at runtime to facilitate fault injection during
 ** testing and sandboxing.  The following array holds the names and pointers
 ** to all overrideable system calls.
+** //可以通过指针函数访问很多的系统调用，因为，他们可能会在运行时被重写，以便在测试和沙盒中故障注入。
+** //下面的数组保存着有可重写的系统调用的名称和指针
 */
 static struct unix_syscall {
-  const char *zName;            /* Name of the system call */
-  sqlite3_syscall_ptr pCurrent; /* Current value of the system call */
-  sqlite3_syscall_ptr pDefault; /* Default value */
+  const char *zName;            /* Name of the system call */  //系统调用名称
+  sqlite3_syscall_ptr pCurrent; /* Current value of the system call */  //系统调用的当前值
+  sqlite3_syscall_ptr pDefault; /* Default value */  //默认值
 } aSyscall[] = {
   { "open",         (sqlite3_syscall_ptr)posixOpen,  0  },
 #define osOpen      ((int(*)(const char*,int,int))aSyscall[0].pCurrent)
@@ -434,6 +441,8 @@ static struct unix_syscall {
 ** lacks the fcntl() system call.  So redefine fcntl() to be something
 ** that always succeeds.  This means that locking does not occur under
 ** DJGPP.  But it is DOS - what did you expect?
+** //DJGPP编译器环境看起来像unix，但他缺少fcntl()系统调用。所以重新定义fcntl()的时候总是会成功。
+** //这意味着锁定不会出现在DJGPP之下。但它可以是DOS-
 */
 #ifdef __DJGPP__
   { "fstat",        0,                 0  },
@@ -575,7 +584,7 @@ static struct unix_syscall {
   { "ioctl",         (sqlite3_syscall_ptr)0,              0 },
 #endif
 
-}; /* End of the overrideable system calls */
+}; /* End of the overrideable system calls */  //可重写系统调用结束
 
 
 /*
@@ -596,11 +605,13 @@ static int robustFchown(int fd, uid_t uid, gid_t gid){
 ** "unix" VFSes.  Return SQLITE_OK opon successfully updating the
 ** system call pointer, or SQLITE_NOTFOUND if there is no configurable
 ** system call named zName.
+** //这是sqlite3_vfs中所有“unix” VFSes的xSetSystemCall()方法。成功地更新系统调用指针并返回SQLTIE_OK,
+** //如果存在没有名为zName的可配置的系统调用就返回SQLITE_NOTFOUND。
 */
 static int unixSetSystemCall(
-  sqlite3_vfs *pNotUsed,        /* The VFS pointer.  Not used */
-  const char *zName,            /* Name of system call to override */
-  sqlite3_syscall_ptr pNewFunc  /* Pointer to new system call value */
+  sqlite3_vfs *pNotUsed,        /* The VFS pointer.  Not used */  //VFS的指针，不使用
+  const char *zName,            /* Name of system call to override */  //系统调用重写的名称
+  sqlite3_syscall_ptr pNewFunc  /* Pointer to new system call value */  //指向新的系统调用值的指针
 ){
   unsigned int i;
   int rc = SQLITE_NOTFOUND;
@@ -609,6 +620,7 @@ static int unixSetSystemCall(
   if( zName==0 ){
     /* If no zName is given, restore all system calls to their default
     ** settings and return NULL
+    ** //如果没有给出zName（系统调用的名字）,所有的系统调用还原为其默认位置并返回NULL
     */
     rc = SQLITE_OK;
     for(i=0; i<sizeof(aSyscall)/sizeof(aSyscall[0]); i++){
@@ -619,6 +631,7 @@ static int unixSetSystemCall(
   }else{
     /* If zName is specified, operate on only the one system call
     ** specified.
+    ** //如果指定了zName, 只能运行在一个指定的系统调用上
     */
     for(i=0; i<sizeof(aSyscall)/sizeof(aSyscall[0]); i++){
       if( strcmp(zName, aSyscall[i].zName)==0 ){
@@ -639,6 +652,7 @@ static int unixSetSystemCall(
 ** Return the value of a system call.  Return NULL if zName is not a
 ** recognized system call name.  NULL is also returned if the system call
 ** is currently undefined.
+** //返回系统调用的值。如果zName不是一个被认可的系统调用名称，返回NULL。如果系统调用目前未定义，也返回NULL。
 */
 static sqlite3_syscall_ptr unixGetSystemCall(
   sqlite3_vfs *pNotUsed,
@@ -658,6 +672,8 @@ static sqlite3_syscall_ptr unixGetSystemCall(
 ** then return the name of the first system call.  Return NULL if zName
 ** is the last system call or if zName is not the name of a valid
 ** system call.
+** //在zName后返回的第一次系统调用的名称。如果zName==NULL, 则返回第一次系统调用的名称。如果zName是最后一次的系统调用。
+** //或者zName不是一个有效的系统调用的名称，请返回NULL。
 */
 static const char *unixNextSystemCall(sqlite3_vfs *p, const char *zName){
   int i = -1;
@@ -686,11 +702,14 @@ static const char *unixNextSystemCall(sqlite3_vfs *p, const char *zName){
 /*
 ** Invoke open().  Do so multiple times, until it either succeeds or
 ** fails for some reason other than EINTR.
+** //调用open()。重复做多次，知道它不是成功就是因为EINTR以外的某种原因失败（EINTR:linux中函数的返回状态，在不同的函数中意义不同）
 **
 ** If the file creation mode "m" is 0 then set it to the default for
 ** SQLite.  The default is SQLITE_DEFAULT_FILE_PERMISSIONS (normally
 ** 0644) as modified by the system umask.  If m is not 0, then
 ** make the file creation mode be exactly m ignoring the umask.
+** //如果文件的创建模式"m"为0，那么将它设置为SQLITE默认的。按照系统umask（umask：设置了用户创建文件的默认权限）
+** //将默认值修改为SQLITE_DEFAULT_FILE_PERMISSIONS（通常是0644）。如果m不为0，然后将文件的创建模式设为完全忽略umask的m。
 **
 ** The m parameter will be non-zero only when creating -wal, -journal,
 ** and -shm files.  We want those files to have *exactly* the same
@@ -699,6 +718,9 @@ static const char *unixNextSystemCall(sqlite3_vfs *p, const char *zName){
 ** transaction crashes and leaves behind hot journals, then any
 ** process that is able to write to the database will also be able to
 ** recover the hot journals.
+** //只有在创建后缀名为-wal,-journal和-shm文件时，m参数将为非零。我们希望这些文件能有和他们原始的数据库“完全”相同的权限，
+** //纯粹由umask设置。在这种方式中，如果数据库文件权限是-rw-rw-rw或-rw-rw-r-和交易崩溃留下的热日志，则任何能写入到数据库的
+** //程序也能恢复热日志
 */
 static int robust_open(const char *z, int f, mode_t m){
   int fd;
@@ -742,10 +764,13 @@ static int robust_open(const char *z, int f, mode_t m){
 ** global mutex is used to protect the unixInodeInfo and
 ** vxworksFileId objects used by this file, all of which may be 
 ** shared by multiple threads.
+** //获得和放弃全局互斥锁的helper函数。全局互斥锁用户保护使用此文件中，所有的一切都可以由多个线程共享的unixInodeInfo
+** //和vxwordsFileId的对象。
 **
 ** Function unixMutexHeld() is used to assert() that the global mutex 
 ** is held when required. This function is only used as part of assert() 
 ** statements. e.g.
+** //当有需要时，函数unixMutexHeld()用于使用全局互斥锁是所需的assert()函数。此函数仅用作assert()语句的一部分，例如：
 **
 **   unixEnterMutex()
 **     assert( unixMutexHeld() );
@@ -783,6 +808,7 @@ static int unixMutexHeld(void) {
 ** Helper function for printing out trace information from debugging
 ** binaries. This returns the string representation of the supplied
 ** integer lock-type.
+** //Helper函数打印来自调试二进制文件的追踪信息。这里的返回值是提供的整型的加锁类型的字符串表示形式
 */
 static const char *azFileLock(int eFileLock){
   switch( eFileLock ){
@@ -799,11 +825,13 @@ static const char *azFileLock(int eFileLock){
 #ifdef SQLITE_LOCK_TRACE
 /*
 ** Print out information about all locking operations.
+** //打印出所有加锁操作的信息
 **
 ** This routine is used for troubleshooting locks on multithreaded
 ** platforms.  Enable by compiling with the -DSQLITE_LOCK_TRACE
 ** command-line option on the compiler.  This code is normally
 ** turned off.
+** //这个程序用户在多线程的平台上的疑难解答锁。通过编译编译器的-DSQLITE_LOCK_TRACE命令行选项启用。此代码通常是关闭的。
 */
 static int lockTrace(int fd, int op, struct flock *p){
   char *zOpName, *zType;
@@ -858,6 +886,7 @@ static int lockTrace(int fd, int op, struct flock *p){
 
 /*
 ** Retry ftruncate() calls that fail due to EINTR
+** //重试由于EINTR失败的ftruncate()调用
 **
 ** All calls to ftruncate() within this file should be made through
 ** this wrapper.  On the Android platform, bypassing the logic below
@@ -884,9 +913,12 @@ static int robust_ftruncate(int h, sqlite3_int64 sz){
 ** intended to translate a variety of "try again" errors into SQLITE_BUSY
 ** and a variety of "please close the file descriptor NOW" errors into 
 ** SQLITE_IOERR
+** //这个程序将标准的POSIX错误代码转化成sqlite3功能的客户端有用的东西。具体来说，
+** //它将被翻译成各种“重试”错误为SQLITE_BUSY和各种“请立即关闭文件描述符”错误为SQLITE_IOERR
 ** 
 ** Errors during initialization of locks, or file system support for locks,
 ** should handle ENOLCK, ENOTSUP, EOPNOTSUPP separately.
+** //锁或文件系统支持的锁的初始化期间发生的错误应分开成ENOLCK, ENOTSUP, ENPNOTSUPP来处理。
 */
 static int sqliteErrorFromPosixError(int posixError, int sqliteIOErr) {
   assert( (sqliteIOErr == SQLITE_IOERR_LOCK) || 
@@ -902,6 +934,7 @@ static int sqliteErrorFromPosixError(int posixError, int sqliteIOErr) {
   case ENOLCK:  
     /* random NFS retry error, unless during file system support 
      * introspection, in which it actually means what it says */
+    //随机NFS重试错误，除非在文件系统支持自省期间，否则这实际上就意味着错误所说的内容
     return SQLITE_BUSY;
     
   case EPERM: 
@@ -919,22 +952,27 @@ static int sqliteErrorFromPosixError(int posixError, int sqliteIOErr) {
 ** On most versions of unix, we can get a unique ID for a file by concatenating
 ** the device number and the inode number.  But this does not work on VxWorks.
 ** On VxWorks, a unique file id must be based on the canonical filename.
+** //对大多数版本的unix中，我们可以得到一个唯一的文件ID，通过串联设备数量和i节点数量。
+** //但这不能用在VxWorks.在VxWorks上，一个唯一的文件id必须基于规范的文件名
 **
 ** A pointer to an instance of the following structure can be used as a
 ** unique file ID in VxWorks.  Each instance of this structure contains
 ** a copy of the canonical filename.  There is also a reference count.  
 ** The structure is reclaimed when the number of pointers to it drops to
 ** zero.
+** //一个指向下列结构体的一个实例指针可以用作VxWorks中的一个唯一的文件ID。这种结构体的每个实例包含一份规范的文件名。
+** //还有一个引用计数。当指针指向它的数目降到零时回收结构体。
 **
 ** There are never very many files open at one time and lookups are not
 ** a performance-critical path, so it is sufficient to put these
 ** structures on a linked list.
+** //有很多文件从来不会打开一次，查找不是性能关键的路径，所以它足以将这些结构放在一个链表上。
 */
 struct vxworksFileId {
-  struct vxworksFileId *pNext;  /* Next in a list of them all */
-  int nRef;                     /* Number of references to this one */
-  int nName;                    /* Length of the zCanonicalName[] string */
-  char *zCanonicalName;         /* Canonical filename */
+  struct vxworksFileId *pNext;  /* Next in a list of them all */  //指向链表中的下一个
+  int nRef;                     /* Number of references to this one */  //对这一引用的次数
+  int nName;                    /* Length of the zCanonicalName[] string */  //zCanonicalName[]字符串的长度
+  char *zCanonicalName;         /* Canonical filename */  //规范的文件名
 };
 
 #if OS_VXWORKS
@@ -1060,6 +1098,9 @@ static void vxworksReleaseFileId(struct vxworksFileId *pId){
 ** by the same process.  It does not explicitly say so, but this implies
 ** that it overrides locks set by the same process using a different
 ** file descriptor.  Consider this test case:
+** //POSIX咨询锁是靠设计打破的。ANSI标准1003.1(1996)部分6.5.2.2 483到490行规定，
+** //当一个进程设置或者清除一个锁的时候，这个操作将符会覆盖任何之前由相同进程设置的锁。
+** //它并没有明确地说明，但是这意味着它将覆盖通过同一进程使用一个不同的文件描述符设置的锁。请考虑此测试用例
 **
 **       int fd1 = open("./file1", O_RDWR|O_CREAT, 0644);
 **       int fd2 = open("./file2", O_RDWR|O_CREAT, 0644);
@@ -1072,6 +1113,9 @@ static void vxworksReleaseFileId(struct vxworksFileId *pId){
 ** But not so.  Since both locks came from the same process, the
 ** second overrides the first, even though they were on different
 ** file descriptors opened on different file names.
+** //假设./file1和./file2实际上是同一个文件（因为一个是硬链接或符号链接到另一个）,
+** //然后如果你在fd1设置排它锁，然后试图在fd2获得排它锁，它的工作原理。我语气第二锁定失败，因为由于fd1文件已经锁定。
+** //但不是这样的。因为锁来自相同的进程，第二个覆盖第一个，尽管他们在不同的文件名打开的不同的文件描述符上。
 **
 ** This means that we cannot use POSIX locks to synchronize file access
 ** among competing threads of the same process.  POSIX locks will work fine
