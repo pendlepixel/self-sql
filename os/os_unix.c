@@ -2421,23 +2421,30 @@ static int nolockClose(sqlite3_file *id) {
 ** the database and with the same name but with a ".lock" extension added.
 ** The existence of a lock directory implies an EXCLUSIVE lock.  All other
 ** lock types (SHARED, RESERVED, PENDING) are mapped into EXCLUSIVE.
+** 点文件锁的工作原理是在同一个目录里面创建次级目录存入数据库，并且有相同的扩展名".lock"。一个锁
+** 目录的存在意味着它是排它锁。其他所有类型的锁（共享锁，保留锁，未决锁）都映射到排它锁。
 */
 
 /*
 ** The file suffix added to the data base filename in order to create the
 ** lock directory.
+** 文件后缀添加到数据库文件里面以创建锁目录
 */
-#define DOTLOCK_SUFFIX ".lock"
+#define DOTLOCK_SUFFIX ".lock"  //预定义锁文件的后缀为.lock
 
 /*
 ** This routine checks if there is a RESERVED lock held on the specified
 ** file by this or any other process. If such a lock is held, set *pResOut
 ** to a non-zero value otherwise *pResOut is set to zero.  The return value
 ** is set to SQLITE_OK unless an I/O error occurs during lock checking.
+** 这个程序会检查指定文件或者是其他任何进程里面是否持有保留锁，如果持有保留锁，将指针*pResOut的值设为
+** 非零，否则设为0。返回值设定为SQLITE_OK除非在锁检查期间发生I/O错误。
 **
 ** In dotfile locking, either a lock exists or it does not.  So in this
 ** variation of CheckReservedLock(), *pResOut is set to true if any lock
 ** is held on the file and false if the file is unlocked.
+** 在点文件锁机制中，锁要么存在要么不存在。所以函数CheckReservedLock()的变化就是如果文件被加锁，*pResOut
+** 的值设为true，文件没被加锁，则设为false。
 */
 static int dotlockCheckReservedLock(sqlite3_file *id, int *pResOut) {
   int rc = SQLITE_OK;
@@ -2457,28 +2464,33 @@ static int dotlockCheckReservedLock(sqlite3_file *id, int *pResOut) {
 ** Lock the file with the lock specified by parameter eFileLock - one
 ** of the following:
 **
-**     (1) SHARED_LOCK
-**     (2) RESERVED_LOCK
-**     (3) PENDING_LOCK
-**     (4) EXCLUSIVE_LOCK
+** 使用参数eFileLock以下值之一指定的锁对文件加锁
+**     (1) SHARED_LOCK  //共享锁
+**     (2) RESERVED_LOCK  //保留锁
+**     (3) PENDING_LOCK  //未决锁
+**     (4) EXCLUSIVE_LOCK  //排它锁
 **
 ** Sometimes when requesting one lock state, additional lock states
 ** are inserted in between.  The locking might fail on one of the later
 ** transitions leaving the lock state different from what it started but
 ** still short of its goal.  The following chart shows the allowed
 ** transitions and the inserted intermediate states:
+** 当请求一个锁状态的时候，额外的锁状态会插入其中。锁定失败后，后来的转换会使它不同于开始的时候
+** 的锁状态，但是仍能达到目标。以下的记录是允许的转换和插入的状态。
 **
-**    UNLOCKED -> SHARED
-**    SHARED -> RESERVED
-**    SHARED -> (PENDING) -> EXCLUSIVE
-**    RESERVED -> (PENDING) -> EXCLUSIVE
-**    PENDING -> EXCLUSIVE
+**    UNLOCKED -> SHARED  //未加锁->共享锁
+**    SHARED -> RESERVED  //共享锁->保留锁
+**    SHARED -> (PENDING) -> EXCLUSIVE  //共享锁->未决锁（插入）->排它锁
+**    RESERVED -> (PENDING) -> EXCLUSIVE  //保留锁->未决锁（插入）->排它锁
+**    PENDING -> EXCLUSIVE  //未决锁->排它锁
 **
 ** This routine will only increase a lock.  Use the sqlite3OsUnlock()
 ** routine to lower a locking level.
+** 这个程序只是增加一个锁。使用sqlite3的OsUnlock()程序降低锁的级别。
 **
 ** With dotfile locking, we really only support state (4): EXCLUSIVE.
 ** But we track the other locking levels internally.
+** 使用点文件锁，实际上只支持第四种状态：排它锁，但是可以在内部追踪其他级别的锁。
 */
 static int dotlockLock(sqlite3_file *id, int eFileLock) {
   unixFile *pFile = (unixFile*)id;
@@ -2488,10 +2500,11 @@ static int dotlockLock(sqlite3_file *id, int eFileLock) {
 
   /* If we have any lock, then the lock file already exists.  All we have
   ** to do is adjust our internal record of the lock level.
+  ** 如果有任意一种锁，那么锁文件其实已经存在了，我们要做的只是修改内部纪录的锁级别
   */
   if( pFile->eFileLock > NO_LOCK ){
     pFile->eFileLock = eFileLock;
-    /* Always update the timestamp on the old file */
+    /* Always update the timestamp on the old file */  //更新旧文件的时间戳
 #ifdef HAVE_UTIME
     utime(zLockFile, NULL);
 #else
@@ -2500,10 +2513,10 @@ static int dotlockLock(sqlite3_file *id, int eFileLock) {
     return SQLITE_OK;
   }
   
-  /* grab an exclusive lock */
+  /* grab an exclusive lock */  //攫取一个排它锁
   rc = osMkdir(zLockFile, 0777);
   if( rc<0 ){
-    /* failed to open/create the lock directory */
+    /* failed to open/create the lock directory */  //创建锁目录失败
     int tErrno = errno;
     if( EEXIST == tErrno ){
       rc = SQLITE_BUSY;
@@ -2516,7 +2529,7 @@ static int dotlockLock(sqlite3_file *id, int eFileLock) {
     return rc;
   } 
   
-  /* got it, set the type and return ok */
+  /* got it, set the type and return ok */  //获取成功，设置类型并返回ok
   pFile->eFileLock = eFileLock;
   return rc;
 }
@@ -2524,11 +2537,14 @@ static int dotlockLock(sqlite3_file *id, int eFileLock) {
 /*
 ** Lower the locking level on file descriptor pFile to eFileLock.  eFileLock
 ** must be either NO_LOCK or SHARED_LOCK.
+** 将文件描述符pFile的锁级别降低到eFileLock，eFileLock必须是NO_LOCK or SHARED_LOCK两者之一。
 **
 ** If the locking level of the file descriptor is already at or below
 ** the requested locking level, this routine is a no-op.
+** 如果文件描述符的锁定级别已经在正在请求的锁级别或以下，那么这个程序是一个空操作
 **
 ** When the locking level reaches NO_LOCK, delete the lock file.
+** 当锁定级别达到了NO_LOCK时删除锁文件
 */
 static int dotlockUnlock(sqlite3_file *id, int eFileLock) {
   unixFile *pFile = (unixFile*)id;
@@ -2540,20 +2556,21 @@ static int dotlockUnlock(sqlite3_file *id, int eFileLock) {
            pFile->eFileLock, osGetpid(0)));
   assert( eFileLock<=SHARED_LOCK );
   
-  /* no-op if possible */
+  /* no-op if possible */  //如果可能是空操作
   if( pFile->eFileLock==eFileLock ){
     return SQLITE_OK;
   }
 
   /* To downgrade to shared, simply update our internal notion of the
   ** lock state.  No need to mess with the file on disk.
+  ** 降低到共享时，只需简单地更新锁状态的内部概念，而不需要毁坏磁盘文件
   */
   if( eFileLock==SHARED_LOCK ){
     pFile->eFileLock = SHARED_LOCK;
     return SQLITE_OK;
   }
   
-  /* To fully unlock the database, delete the lock file */
+  /* To fully unlock the database, delete the lock file */  //完全打开数据库时删除锁文件
   assert( eFileLock==NO_LOCK );
   rc = osRmdir(zLockFile);
   if( rc<0 ){
@@ -2572,6 +2589,7 @@ static int dotlockUnlock(sqlite3_file *id, int eFileLock) {
 
 /*
 ** Close a file.  Make sure the lock has been released before closing.
+** 关闭一个文件，确保锁在关闭之前已经被释放
 */
 static int dotlockClose(sqlite3_file *id) {
   unixFile *pFile = (unixFile*)id;
@@ -2586,7 +2604,8 @@ static int dotlockClose(sqlite3_file *id) {
 /******************************************************************************
 ************************** Begin flock Locking ********************************
 **
-** Use the flock() system call to do file locking.
+** 聚集锁
+** Use the flock() system call to do file locking.  使用系统调用函数flock()执行文件锁定
 **
 ** flock() locking is like dot-file locking in that the various
 ** fine-grain locking levels supported by SQLite are collapsed into
@@ -2594,13 +2613,17 @@ static int dotlockClose(sqlite3_file *id) {
 ** PENDING locks are the same thing as an EXCLUSIVE lock.  SQLite
 ** still works when you do this, but concurrency is reduced since
 ** only a single process can be reading the database at a time.
+** 聚集锁在sqlite支持各种细粒锁级别紧缩成一个单独的排它锁这一点上和点锁文件是一样的。换句话说，
+** 共享锁，保留锁和未决锁对于排它锁来说是一样的。当你这样做时，sqlite仍然工作，但并发性降低，因为
+** 同一时间只有一个进程可以读取数据库。
 **
 ** Omit this section if SQLITE_ENABLE_LOCKING_STYLE is turned off
+** 如果SQLITE_ENABLE_LOCKING_STYLE被关闭或者VXWORKS被编译，则忽略这部分。
 */
 #if SQLITE_ENABLE_LOCKING_STYLE
 
 /*
-** Retry flock() calls that fail with EINTR
+** Retry flock() calls that fail with EINTR  系统调用中断则重试flock()函数调用
 */
 #ifdef EINTR
 static int robust_flock(int fd, int op){
@@ -2618,6 +2641,8 @@ static int robust_flock(int fd, int op){
 ** file by this or any other process. If such a lock is held, set *pResOut
 ** to a non-zero value otherwise *pResOut is set to zero.  The return value
 ** is set to SQLITE_OK unless an I/O error occurs during lock checking.
+** 这个程序会检查指定文件或者是其他任何进程里是否持有保留锁，如果持有保留锁，将指针*pResOut
+** 的值设为非零，否则设为0。返回值设为SQLITE_OK除非在锁检查期间发生I/O错误。
 */
 static int flockCheckReservedLock(sqlite3_file *id, int *pResOut){
   int rc = SQLITE_OK;
@@ -2628,21 +2653,21 @@ static int flockCheckReservedLock(sqlite3_file *id, int *pResOut){
   
   assert( pFile );
   
-  /* Check if a thread in this process holds such a lock */
+  /* Check if a thread in this process holds such a lock */  //检查进程中是否有线程持有保留锁
   if( pFile->eFileLock>SHARED_LOCK ){
     reserved = 1;
   }
   
-  /* Otherwise see if some other process holds it. */
+  /* Otherwise see if some other process holds it. */  //如果没有则查看其他进程
   if( !reserved ){
-    /* attempt to get the lock */
+    /* attempt to get the lock */  //获取锁
     int lrc = robust_flock(pFile->h, LOCK_EX | LOCK_NB);
     if( !lrc ){
-      /* got the lock, unlock it */
+      /* got the lock, unlock it */  //获取锁，并解锁
       lrc = robust_flock(pFile->h, LOCK_UN);
       if ( lrc ) {
         int tErrno = errno;
-        /* unlock failed with an error */
+        /* unlock failed with an error */  //解锁发生错误并且失败
         lrc = SQLITE_IOERR_UNLOCK; 
         storeLastErrno(pFile, tErrno);
         rc = lrc;
@@ -2650,7 +2675,7 @@ static int flockCheckReservedLock(sqlite3_file *id, int *pResOut){
     } else {
       int tErrno = errno;
       reserved = 1;
-      /* someone else might have it reserved */
+      /* someone else might have it reserved */  //其他进程可能保留了锁
       lrc = sqliteErrorFromPosixError(tErrno, SQLITE_IOERR_LOCK); 
       if( IS_LOCK_ERROR(lrc) ){
         storeLastErrno(pFile, tErrno);
@@ -3472,20 +3497,27 @@ static int nfsUnlock(sqlite3_file *id, int eFileLock){
 ** methods were defined in divisions above (one locking method per
 ** division).  Those methods that are common to all locking modes
 ** are gather together into this division.
+** 下一个部分包含除锁定方法外所有sqlite3文件对象方法的实现。锁定方法已在以上部分中定义
+** （一个部分定义一个锁定方法）。那些对所有锁定模式共同的方法在这个部分聚集在一起
 */
 
 /*
 ** Seek to the offset passed as the second argument, then read cnt 
 ** bytes into pBuf. Return the number of bytes actually read.
+** 寻求偏移量作为第二个参数传递，然后读取cnt字节到pBuf中。返回实际读取的字节数。
 **
 ** NB:  If you define USE_PREAD or USE_PREAD64, then it might also
 ** be necessary to define _XOPEN_SOURCE to be 500.  This varies from
 ** one system to another.  Since SQLite does not define USE_PREAD
 ** in any form by default, we will not attempt to define _XOPEN_SOURCE.
 ** See tickets #2741 and #2681.
+** 注：如果你定义USE_PREAD或者USE_PREAD64，那么它可能也有必要定义_XOPEN_SOURCE为500。
+** 从一个系统到另一个系统这个不同。因为SQLITE在默认情况下不定义USE_PREAD任何形式，我们
+** 不会试图定义_XOPEN_SOURCE。看标签#2741到#2681
 **
 ** To avoid stomping the errno value on a failed read the lastErrno value
 ** is set before returning.
+** 为了避免errno值的读取失败，lastErrno值在返回前被设定。
 */
 static int seekAndRead(unixFile *id, sqlite3_int64 offset, void *pBuf, int cnt){
   int got;
@@ -3535,6 +3567,7 @@ static int seekAndRead(unixFile *id, sqlite3_int64 offset, void *pBuf, int cnt){
 ** Read data from a file into a buffer.  Return SQLITE_OK if all
 ** bytes were read successfully and SQLITE_IOERR if anything goes
 ** wrong.
+** 从文件中读取数据到缓冲区。如果所有字节读取成功返回SQLITE_OK,如果出错返回SQLITE_IOERR。
 */
 static int unixRead(
   sqlite3_file *id, 
@@ -3549,7 +3582,9 @@ static int unixRead(
   assert( amt>0 );
 
   /* If this is a database file (not a journal, super-journal or temp
-  ** file), the bytes in the locking range should never be read or written. */
+  ** file), the bytes in the locking range should never be read or written. 
+  ** 如果这是一个数据库文件（不是一个日志，主日志或者临时文件），锁定范围的字节不能读或写。
+  */
 #if 0
   assert( pFile->pPreallocatedUnused==0
        || offset>=PENDING_BYTE+512
@@ -3655,8 +3690,10 @@ static int seekAndWriteFd(
 ** Seek to the offset in id->offset then read cnt bytes into pBuf.
 ** Return the number of bytes actually read.  Update the offset.
 **
+** 用id->offset寻找偏移，然后读取cnt字节到pBuf中。返回实际读取的字节数，更新偏移。
 ** To avoid stomping the errno value on a failed write the lastErrno value
 ** is set before returning.
+** 为了避免errno的值写入失败，lastErrno的值在返回前被设定。
 */
 static int seekAndWrite(unixFile *id, i64 offset, const void *pBuf, int cnt){
   return seekAndWriteFd(id->h, offset, pBuf, cnt, &id->lastErrno);
@@ -3666,6 +3703,7 @@ static int seekAndWrite(unixFile *id, i64 offset, const void *pBuf, int cnt){
 /*
 ** Write data from a buffer into a file.  Return SQLITE_OK on success
 ** or some other error code on failure.
+** 从缓冲区写入数据到一个文件中。成功返回SQLITE_OK或者失败返回一些其他错误代码。
 */
 static int unixWrite(
   sqlite3_file *id, 
@@ -3679,7 +3717,9 @@ static int unixWrite(
   assert( amt>0 );
 
   /* If this is a database file (not a journal, super-journal or temp
-  ** file), the bytes in the locking range should never be read or written. */
+  ** file), the bytes in the locking range should never be read or written. 
+  ** 如果这是一个数据库文件（不是一个日志，主文件或者临时文件），锁定范围的字节不能读或写
+  */
 #if 0
   assert( pFile->pPreallocatedUnused==0
        || offset>=PENDING_BYTE+512
@@ -3693,9 +3733,12 @@ static int unixWrite(
   ** normal database file) then record the fact that the database
   ** has changed.  If the transaction counter is modified, record that
   ** fact too.
+  ** 如果我们正常写入一个数据库文件（而不是做一个热日志回滚或者写入到一些不同于
+  ** 正常数据库文件的文件）那么记录数据库改变的事实。如果事务计数器被修改，也记录
+  ** 这个事实。
   */
   if( pFile->inNormalWrite ){
-    pFile->dbUpdate = 1;  /* The database has been modified */
+    pFile->dbUpdate = 1;  /* The database has been modified */  //数据库被修改
     if( offset<=24 && offset+amt>=27 ){
       int rc;
       char oldCntr[4];
@@ -3751,6 +3794,7 @@ static int unixWrite(
 /*
 ** Count the number of fullsyncs and normal syncs.  This is used to test
 ** that syncs and fullsyncs are occurring at the right times.
+** 计算fullsyncs和正常syncs的数量，这用来测试syncs和fullsyncs在正确的时间发生。
 */
 int sqlite3_sync_count = 0;
 int sqlite3_fullsync_count = 0;
@@ -3761,6 +3805,9 @@ int sqlite3_fullsync_count = 0;
 ** Others do no.  To be safe, we will stick with the (slightly slower)
 ** fsync(). If you know that your system does support fdatasync() correctly,
 ** then simply compile with -Dfdatasync=fdatasync or -DHAVE_FDATASYNC
+** 我们不相信系统提供一个有效的fdatasync()。有些时这样的，其他的不是。为了安全起见，我们
+** 将坚持（稍慢）fsync()。如果你知道你的系统确实正确的支持fdatasync()，那么用-Dfdatasync=fdatasync
+** 简单地编译
 */
 #if !defined(fdatasync) && !HAVE_FDATASYNC
 # define fdatasync fsync
@@ -3770,6 +3817,8 @@ int sqlite3_fullsync_count = 0;
 ** Define HAVE_FULLFSYNC to 0 or 1 depending on whether or not
 ** the F_FULLFSYNC macro is defined.  F_FULLFSYNC is currently
 ** only available on Mac OS X.  But that could change.
+** 定义HAVE_FULLFSYNC为0或者1取决于F_FULLFSYNC宏是否被定义。F_FULLFSYNC
+** 目前仅在Mac OS X上可用。但可能会改变。
 */
 #ifdef F_FULLFSYNC
 # define HAVE_FULLFSYNC 1
@@ -3782,12 +3831,17 @@ int sqlite3_fullsync_count = 0;
 ** The fsync() system call does not work as advertised on many
 ** unix systems.  The following procedure is an attempt to make
 ** it work better.
+** 在很多unix系统上，fsync()系统调用不像广告一样起了作用。下面的程序是为了让
+** 它工作的更好。
 **
 ** The SQLITE_NO_SYNC macro disables all fsync()s.  This is useful
 ** for testing when we want to run through the test suite quickly.
 ** You are strongly advised *not* to deploy with SQLITE_NO_SYNC
 ** enabled, however, since with SQLITE_NO_SYNC enabled, an OS crash
 ** or power failure will likely corrupt the database file.
+** SQLITE_NO_SYNC宏禁用所有fsync()。当我们想快速地运行测试套件的时候，这对测试
+** 是有用的。强烈的建议不再SQLITE_NO_SYNC启用下进行配置，因为启用了SQLITE_NO_SYNC
+** 后，一个操作系统崩溃或者电源故障可能会毁坏数据库文件
 **
 ** SQLite sets the dataOnly flag if the size of the file is unchanged.
 ** The idea behind dataOnly is that it should only write the file content
@@ -3801,6 +3855,13 @@ int sqlite3_fullsync_count = 0;
 ** as far as SQLite is concerned, an fdatasync() is always adequate.
 ** So, we always use fdatasync() if it is available, regardless of
 ** the value of the dataOnly flag.
+** 如果文件的大小不变，SQLITE设置dataOnly标志。
+** dataOnly背后的想法是它应该只写文件内容到磁盘，而不是索引节点。由于文件大小是索引节
+** 的一部分，如果文件大小没变，我们只设置dataOnly。但是，Ted Ts'o告诉我们，fdatasync()也将
+** 写索引结点，如果文件大小已经改变。fdatasync()和fsync()之间唯一真正的区别，Ted告诉我们了，
+** 是fdatasync()不会刷新索引节点，如果mtime或者所有者或者其他索引节点属性已经改变了。
+** 我们只关心文件大小，不是其他文件属性，所以对sqlite而言，一个fdatasync()总是足够的。
+** 所以我们总是只用fdatasync()，如果它是可用的，不管dataOnly标志的值。
 */
 static int full_fsync(int fd, int fullSync, int dataOnly){
   int rc;
@@ -3808,6 +3869,8 @@ static int full_fsync(int fd, int fullSync, int dataOnly){
   /* The following "ifdef/elif/else/" block has the same structure as
   ** the one below. It is replicated here solely to avoid cluttering 
   ** up the real code with the UNUSED_PARAMETER() macros.
+  ** 下面的，"ifdef/elif/else/"块如下面一个块一样具有相同的结构。它单独地复制在这里
+  ** 避免弄乱真正的带UNUSED_PARAMETER()宏的代码
   */
 #ifdef SQLITE_NO_SYNC
   UNUSED_PARAMETER(fd);
@@ -3823,6 +3886,8 @@ static int full_fsync(int fd, int fullSync, int dataOnly){
   /* Record the number of times that we do a normal fsync() and 
   ** FULLSYNC.  This is used during testing to verify that this procedure
   ** gets called with the correct arguments.
+  ** 记录我们做一个正常的fsync()和FULLSUNC的次数。这是在测试期间使用来检验这个
+  ** 过程以正确的参数被调用了。
   */
 #ifdef SQLITE_TEST
   if( fullSync ) sqlite3_fullsync_count++;
@@ -3833,6 +3898,7 @@ static int full_fsync(int fd, int fullSync, int dataOnly){
   ** no-op.  But go ahead and call fstat() to validate the file
   ** descriptor as we need a method to provoke a failure during
   ** coverate testing.
+  ** 如果我们用SQLITE_NO_SYNC标志编译，那么同步是一个空操作。
   */
 #ifdef SQLITE_NO_SYNC
   {
@@ -3852,6 +3918,10 @@ static int full_fsync(int fd, int fullSync, int dataOnly){
   ** and (for now) ignore the overhead of a superfluous fcntl call.  
   ** It'd be better to detect fullfsync support once and avoid 
   ** the fcntl call every time sync is called.
+  ** 如果FULLFSYNC失败，回退尝试一个fsync()。
+  ** fullfsync在本地文件系统（在OSX上）失败，是不该可能的，所以失败表明
+  ** FULLFSYNC不支持这个文件系统。所以，尝试一个fsync，（现在）忽略多余的
+  ** fcntl调用开销。最好检测fullfsync支持一次，避免每次fcntl调用sync被调用。
   */
   if( rc ) rc = fsync(fd);
 
@@ -3881,11 +3951,16 @@ static int full_fsync(int fd, int fullSync, int dataOnly){
 ** SQLITE_OK is returned. If an error occurs, either SQLITE_NOMEM
 ** or SQLITE_CANTOPEN is returned and *pFd is set to an undefined
 ** value.
+** 打开一个文件描述符到包含文件zFilename的目录。
+** 如果成功，*pFd设置为打开的文件描述符，SQLITE_OK返回。如果出现错误，SQLITE_NOMEM
+** 或者SQLITE_CANTOPEN返回，*pFd设置一个未定义的值。
 **
 ** The directory file descriptor is used for only one thing - to
 ** fsync() a directory to make sure file creation and deletion events
 ** are flushed to disk.  Such fsyncs are not needed on newer
 ** journaling filesystems, but are required on older filesystems.
+** 目录文件描述符用于只有一件事，fsync()一个目录，确保文件创建和删除事件被刷新到磁盘
+** 这样的fsyncs在更新的日志文件系统不需要，但在旧文件系统需要。
 **
 ** This routine can be overridden using the xSetSysCall interface.
 ** The ability to override this routine was added in support of the
@@ -3894,9 +3969,14 @@ static int full_fsync(int fd, int fullSync, int dataOnly){
 ** replace this routine with a harmless no-op.  To make this routine
 ** a no-op, replace it with a stub that returns SQLITE_OK but leaves
 ** *pFd set to a negative number.
+** 这个例程使用xSetSysCall接口可以被覆盖。
+** 覆盖这个例程的能力被增加来支持chromiun浏览器沙箱。打开一个目录是一个安全风险（我们被告知）
+** 所以使他可覆盖允许chromium沙箱用一种无害的空操作来代替这个例程，代之以一个存根，返回
+** SQLITE_OK但是留下*pFd设置为负数。
 **
 ** If SQLITE_OK is returned, the caller is responsible for closing
 ** the file descriptor *pFd using close().
+** 如果SQLITE_OK返回，调用者负责关闭文件描述符*pFd，使用close()。
 */
 static int openDirectory(const char *zFilename, int *pFd){
   int ii;
@@ -3922,10 +4002,13 @@ static int openDirectory(const char *zFilename, int *pFd){
 
 /*
 ** Make sure all writes to a particular file are committed to disk.
+** 确保所有的写入到一个特定文件提交到磁盘
 **
 ** If dataOnly==0 then both the file itself and its metadata (file
 ** size, access time, etc) are synced.  If dataOnly!=0 then only the
 ** file data is synced.
+** 如果dataOnly==0,那么文件本身及其元数据（文件大小、访问时间等）是同步的。
+** 如果dataOnly != 0，那么只有文件数据是同步的。
 **
 ** Under Unix, also make sure that the directory entry for the file
 ** has been created by fsync-ing the directory that contains the file.
@@ -3934,6 +4017,9 @@ static int openDirectory(const char *zFilename, int *pFd){
 ** SQLite to access the file will not know that the journal exists (because
 ** the directory entry for the journal was never created) and the transaction
 ** will not roll back - possibly leading to database corruption.
+** 在Unix中，也确保文件的目录条目已经通过同步包含文件的目录创建。
+** 如果我们不这么做，我们遇到停电，日志目录条目在我们重启后可能不存在。下一个SQLITE访问
+** 文件将不知道日志存在（因为日志目录条目从未创建），事务不将回滚，可能导致数据库毁坏。
 */
 static int unixSync(sqlite3_file *id, int flags){
   int rc;
@@ -3942,13 +4028,15 @@ static int unixSync(sqlite3_file *id, int flags){
   int isDataOnly = (flags&SQLITE_SYNC_DATAONLY);
   int isFullsync = (flags&0x0F)==SQLITE_SYNC_FULL;
 
-  /* Check that one of SQLITE_SYNC_NORMAL or FULL was passed */
+  /* Check that one of SQLITE_SYNC_NORMAL or FULL was passed */  //检查SQLITE_SYNC_NORMAL或者FULL的一个通过。
   assert((flags&0x0F)==SQLITE_SYNC_NORMAL
       || (flags&0x0F)==SQLITE_SYNC_FULL
   );
 
   /* Unix cannot, but some systems may return SQLITE_FULL from here. This
   ** line is to test that doing so does not cause any problems.
+  ** Unix不能，但是一些系统可能从这里返回SQLITE_FULL。这行用于测试那样做，
+  ** 所以这里不会引起任何问题。
   */
   SimulateDiskfullError( return SQLITE_FULL );
 
@@ -3964,6 +4052,8 @@ static int unixSync(sqlite3_file *id, int flags){
   /* Also fsync the directory containing the file if the DIRSYNC flag
   ** is set.  This is a one-time occurrence.  Many systems (examples: AIX)
   ** are unable to fsync a directory, so ignore errors on the fsync.
+  ** 也同步包含这个文件的目录，如果DIRSYNC标志被设定。这是一次性的发生。很多系统
+  ** （例如：AIX）不能同步一个目录，所以忽略同步错误。
   */
   if( pFile->ctrlFlags & UNIXFILE_DIRSYNC ){
     int dirfd;
@@ -3984,6 +4074,7 @@ static int unixSync(sqlite3_file *id, int flags){
 
 /*
 ** Truncate an open file to a specified size
+** 截断一个打开的文件到指定的大小。
 */
 static int unixTruncate(sqlite3_file *id, i64 nByte){
   unixFile *pFile = (unixFile *)id;
@@ -3995,6 +4086,8 @@ static int unixTruncate(sqlite3_file *id, i64 nByte){
   ** file so that it consists of an integer number of chunks (i.e. the
   ** actual file size after the operation may be larger than the requested
   ** size).
+  ** 如果用户已经配置了这个文件的块的大小，截断文件以便于包含整数的块（即操作之后的实际文件
+  ** 大小可能已经大于请求的大小）
   */
   if( pFile->szChunk>0 ){
     nByte = ((nByte + pFile->szChunk - 1)/pFile->szChunk) * pFile->szChunk;
@@ -4012,6 +4105,9 @@ static int unixTruncate(sqlite3_file *id, i64 nByte){
     ** that effectively updates the change counter.  This might happen
     ** when restoring a database using the backup API from a zero-length
     ** source.
+    ** 如果我们正常写入到数据文件（而不是做一个热日志回滚或者写入到一些不是正常数据库文件的文件
+    ** ），我们截断文件长度为零，这有效的更新改变计数器。这可能发生，当从一个0长度的源使用备份
+    ** API来恢复数据库。
     */
     if( pFile->inNormalWrite && nByte==0 ){
       pFile->transCntrChng = 1;
@@ -4034,6 +4130,7 @@ static int unixTruncate(sqlite3_file *id, i64 nByte){
 
 /*
 ** Determine the current size of a file in bytes
+** 确定当前文件的大小，字节为单位
 */
 static int unixFileSize(sqlite3_file *id, i64 *pSize){
   int rc;
@@ -4052,6 +4149,9 @@ static int unixFileSize(sqlite3_file *id, i64 *pSize){
   ** in the OS-X msdos filesystem.  In order to avoid problems with upper
   ** layers, we need to report this file size as zero even though it is
   ** really 1.   Ticket #3260.
+  ** 当打开一个大小为0的数据库，findInodeInfo()程序将一个字节写入该文件为了解决一个
+  ** 在OS-X msdos文件系统上的错误。为了避免上面的问题，我们需要报告这个文件大小为0，
+  ** 即使它真是1。 标签#3260
   */
   if( *pSize==1 ) *pSize = 0;
 
