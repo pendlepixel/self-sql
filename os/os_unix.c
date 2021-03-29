@@ -4172,11 +4172,13 @@ static int proxyFileControl(sqlite3_file*,int,void*);
 ** file-control operation.  Enlarge the database to nBytes in size
 ** (rounded up to the next chunk-size).  If the database is already
 ** nBytes or larger, this routine is a no-op.
+** 调用这个函数来处理SQLITE_FCNTL_SIZE_HIN文件控制操作。扩大数据库到nBytes大小
+** （算到下一个块大小）。如果数据库已经nBytes或者更大，这个例程是一个空操作。
 */
 static int fcntlSizeHint(unixFile *pFile, i64 nByte){
   if( pFile->szChunk>0 ){
-    i64 nSize;                    /* Required file size */
-    struct stat buf;              /* Used to hold return values of fstat() */
+    i64 nSize;                    /* Required file size ，请求文件大小*/
+    struct stat buf;              /* Used to hold return values of fstat() ，用来保存fstat()返回值*/
    
     if( osFstat(pFile->h, &buf) ){
       return SQLITE_IOERR_FSTAT;
@@ -4239,8 +4241,11 @@ static int fcntlSizeHint(unixFile *pFile, i64 nByte){
 /*
 ** If *pArg is initially negative then this is a query.  Set *pArg to
 ** 1 or 0 depending on whether or not bit mask of pFile->ctrlFlags is set.
+** 如果*pArg初始是负的，那么这是一个查询。设置*pArg为1或者0取决于是否pFile->ctrlFlags
+** 位屏蔽被设置。
 **
 ** If *pArg is 0 or 1, then clear or set the mask bit of pFile->ctrlFlags.
+** 如果*pArg为0或者1，那么清除或者设置pFile->ctrlFlags屏蔽位。
 */
 static void unixModeBit(unixFile *pFile, unsigned char mask, int *pArg){
   if( *pArg<0 ){
@@ -4257,6 +4262,7 @@ static int unixGetTempname(int nBuf, char *zBuf);
 
 /*
 ** Information and control of an open file handle.
+** 有关一个打开文件句柄的信息和控制
 */
 static int unixFileControl(sqlite3_file *id, int op, void *pArg){
   unixFile *pFile = (unixFile*)id;
@@ -4358,6 +4364,8 @@ static int unixFileControl(sqlite3_file *id, int op, void *pArg){
     ** a rollback and that the database is therefore unchanged and
     ** it hence it is OK for the transaction change counter to be
     ** unchanged.
+    ** 呼叫器调用这个方法来标示它已经做了一个回滚，因此数据库不改变，并且它表示
+    ** 计数器改变计数不变是没问题的。
     */
     case SQLITE_FCNTL_DB_UNCHANGED: {
       ((unixFile*)id)->dbUpdate = 0;
@@ -4485,11 +4493,14 @@ static void setDeviceCharacteristics(unixFile *pFile){
 ** Return the sector size in bytes of the underlying block device for
 ** the specified file. This is almost always 512 bytes, but may be
 ** larger for some devices.
+** 以指定文件的底层块设备来返回扇区大小。这几乎总是512字节，但可能对于一些设备来说更大。
 **
 ** SQLite code assumes this function cannot fail. It also assumes that
 ** if two files are created in the same file-system directory (i.e.
 ** a database and its journal file) that the sector size will be the
 ** same for both.
+** SQLITE代码假设这个函数不会失败。它还假设如果两个文件在相同的文件系统目录中创建（即一个
+** 数据库和它的日志文件）两个扇区大小将一样。
 */
 static int unixSectorSize(sqlite3_file *id){
   unixFile *pFd = (unixFile*)id;
@@ -4499,6 +4510,7 @@ static int unixSectorSize(sqlite3_file *id){
 
 /*
 ** Return the device characteristics for the file.
+** 返回文件的设备特征。
 **
 ** This VFS is set up to return SQLITE_IOCAP_POWERSAFE_OVERWRITE by default.
 ** However, that choice is controversial since technically the underlying
@@ -4509,6 +4521,11 @@ static int unixSectorSize(sqlite3_file *id){
 ** of required I/O for journaling, since a lot of padding is eliminated.
 **  Hence, while POWERSAFE_OVERWRITE is on by default, there is a file-control
 ** available to turn it off and URI query parameter available to turn it off.
+** 这个VFS设置来默认返回SQLITE_IOCAP_POWERSAFE_OVERWRITE.
+** 但是，这个选择是矛盾的，因为技术上底层文件系统不会总是提供电源安全覆盖。
+** （换句话说，发生停电事件后，部分从来没被写入的文件可能最终被修改。）但是，non-PSOW行为
+** 是非常罕见的。并且声明PSOW使日志的I/O请求数量大量减少，因为很多填充被消除。因此，虽然
+** POWERSAFE_OVERWRITE在默认情况下，但有个文件控制可用来关掉它且URI查询参数可用来关掉它。
 */
 static int unixDeviceCharacteristics(sqlite3_file *id){
   unixFile *pFd = (unixFile*)id;
@@ -4540,11 +4557,14 @@ static int unixGetpagesize(void){
 
 /*
 ** Object used to represent an shared memory buffer.  
+** 对象用来代表一个共享内存缓冲区
 **
 ** When multiple threads all reference the same wal-index, each thread
 ** has its own unixShm object, but they all point to a single instance
 ** of this unixShmNode object.  In other words, each wal-index is opened
 ** only once per process.
+** 当多个线程都引用相同的wal-index索引，每个线程有它自己的unixShm对象，但是它们
+** 都指向这个unixShmNode对象的一个实例。换句话说，每个wal-index每个过程只打开一次。
 **
 ** Each unixShmNode object is connected to a single unixInodeInfo object.
 ** We could coalesce this object into unixInodeInfo, but that would mean
@@ -4552,13 +4572,18 @@ static int unixGetpagesize(void){
 ** open files) would have to carry around this extra information.  So
 ** the unixInodeInfo object contains a pointer to this unixShmNode object
 ** and the unixShmNode object is created only when needed.
+** 每个unixShmNode对象关联到一个unixInodeInfo对象。我们可以合并这个对象到unixInodeInfo,
+** 但这意味着每一个打开的文件不使用共享内存（换句话说，大多数打开的文件）必须携带这额外的信息
+** 所以这个unixInodeInfo对象包含这个unixShmNode对象的一个指针，且unixShmNode对象仅当需要的时候创建
 **
 ** unixMutexHeld() must be true when creating or destroying
 ** this object or while reading or writing the following fields:
+** unixMutexHeld()必须为真，当创建或者销毁这个对象时，或当读或写以下字段：
 **
 **      nRef
 **
 ** The following fields are read-only after the object is created:
+** 以下字段在对象创建之后是只读的。
 ** 
 **      hShm
 **      zFilename
