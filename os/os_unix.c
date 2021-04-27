@@ -4591,23 +4591,25 @@ static int unixGetpagesize(void){
 ** Either unixShmNode.pShmMutex must be held or unixShmNode.nRef==0 and
 ** unixMutexHeld() is true when reading or writing any other field
 ** in this structure.
+** 要么unixShmNode.mutex互斥必须被持有或unixShmNode.nRef为0，并且当读或写在这个结构体
+** 的任何其他字段时unixMutexHeld()为真
 */
 struct unixShmNode {
-  unixInodeInfo *pInode;     /* unixInodeInfo that owns this SHM node */
-  sqlite3_mutex *pShmMutex;  /* Mutex to access this object */
+  unixInodeInfo *pInode;     /* unixInodeInfo that owns this SHM node */ //unixInodeInfo拥有这个SHM节点
+  sqlite3_mutex *pShmMutex;  /* Mutex to access this object */ //互斥访问这个对象
   char *zFilename;           /* Name of the mmapped file */
-  int hShm;                  /* Open file descriptor */
-  int szRegion;              /* Size of shared-memory regions */
-  u16 nRegion;               /* Size of array apRegion */
+  int hShm;                  /* Open file descriptor */  //打开文件描述符
+  int szRegion;              /* Size of shared-memory regions */ //共享内存区域的大小
+  u16 nRegion;               /* Size of array apRegion */ //数组apRegion大小
   u8 isReadonly;             /* True if read-only */
   u8 isUnlocked;             /* True if no DMS lock held */
-  char **apRegion;           /* Array of mapped shared-memory regions */
-  int nRef;                  /* Number of unixShm objects pointing to this */
+  char **apRegion;           /* Array of mapped shared-memory regions */ //映射共享内存区域的数组
+  int nRef;                  /* Number of unixShm objects pointing to this */ //许多unixShm对象指向这一点
   unixShm *pFirst;           /* All unixShm objects pointing to this */
   int aLock[SQLITE_SHM_NLOCK];  /* # shared locks on slot, -1==excl lock */
 #ifdef SQLITE_DEBUG
-  u8 exclMask;               /* Mask of exclusive locks held */
-  u8 sharedMask;             /* Mask of shared locks held */
+  u8 exclMask;               /* Mask of exclusive locks held */ //持有排它锁掩码
+  u8 sharedMask;             /* Mask of shared locks held */ //持有共享锁的掩码
   u8 nextShmId;              /* Next available unixShm.id value */
 #endif
 };
@@ -4615,23 +4617,32 @@ struct unixShmNode {
 /*
 ** Structure used internally by this VFS to record the state of an
 ** open shared memory connection.
+** 这个VFS使用内部的结构体来记录一个打开的共享内存连接的状态
 **
 ** The following fields are initialized when this object is created and
 ** are read-only thereafter:
+** 以下字段被初始化是当这个对象创建时，且之后是只读的。
 **
 **    unixShm.pShmNode
 **    unixShm.id
 **
 ** All other fields are read/write.  The unixShm.pShmNode->pShmMutex must
 ** be held while accessing any read/write fields.
+** 所以其他字段是读/写。unixShm.pFile->mutex必须被持有，当访问任何读/写字段。
 */
 struct unixShm {
   unixShmNode *pShmNode;     /* The underlying unixShmNode object */
+                             //底层unixShmNode对象
   unixShm *pNext;            /* Next unixShm with the same unixShmNode */
+                             //下一个一样的unixShmNode的unixShm
   u8 hasMutex;               /* True if holding the unixShmNode->pShmMutex */
+                             //如果持有unixShmNode互斥则为真
   u8 id;                     /* Id of this connection within its unixShmNode */
+                             //unixShmNode内连接的Id
   u16 sharedMask;            /* Mask of shared locks held */
+                             //持有共享锁掩码
   u16 exclMask;              /* Mask of exclusive locks held */
+                             //持有排它锁掩码
 };
 
 /*
