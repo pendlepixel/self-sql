@@ -242,14 +242,6 @@ struct unixFile {
 #ifdef SQLITE_ENABLE_SETLK_TIMEOUT
   unsigned iBusyTimeout;              /* Wait this many millisec on locks */
 #endif
-
-#ifdef SQLITE_TEST
-  /* In test mode, increase the size of this structure a bit so that 
-  ** it is larger than the struct CrashFile defined in test6.c.
-  ** //在测试模式下，增加一点此结构的大小，让它大于CrashFile在test6.c中定义的结构。
-  */
-  char aPadding[32];
-#endif
 };
 
 /* This variable holds the process id (pid) from when the xRandomness()
@@ -732,88 +724,6 @@ static void unixLeaveMutex(void){
   sqlite3_mutex_leave(unixBigLock);
 }
 
-
-#ifdef SQLITE_HAVE_OS_TRACE
-/*
-** Helper function for printing out trace information from debugging
-** binaries. This returns the string representation of the supplied
-** integer lock-type.
-** //Helper函数打印来自调试二进制文件的追踪信息。这里的返回值是提供的整型的加锁类型的字符串表示形式
-*/
-static const char *azFileLock(int eFileLock){
-  switch( eFileLock ){
-    case NO_LOCK: return "NONE";
-    case SHARED_LOCK: return "SHARED";
-    case RESERVED_LOCK: return "RESERVED";
-    case PENDING_LOCK: return "PENDING";
-    case EXCLUSIVE_LOCK: return "EXCLUSIVE";
-  }
-  return "ERROR";
-}
-#endif
-
-#ifdef SQLITE_LOCK_TRACE
-/*
-** Print out information about all locking operations.
-** //打印出所有加锁操作的信息
-**
-** This routine is used for troubleshooting locks on multithreaded
-** platforms.  Enable by compiling with the -DSQLITE_LOCK_TRACE
-** command-line option on the compiler.  This code is normally
-** turned off.
-** //这个程序用户在多线程的平台上的疑难解答锁。通过编译编译器的-DSQLITE_LOCK_TRACE命令行选项启用。此代码通常是关闭的。
-*/
-static int lockTrace(int fd, int op, struct flock *p){
-  char *zOpName, *zType;
-  int s;
-  int savedErrno;
-  if( op==F_GETLK ){
-    zOpName = "GETLK";
-  }else if( op==F_SETLK ){
-    zOpName = "SETLK";
-  }else{
-    s = osFcntl(fd, op, p);
-    sqlite3DebugPrintf("fcntl unknown %d %d %d\n", fd, op, s);
-    return s;
-  }
-  if( p->l_type==F_RDLCK ){
-    zType = "RDLCK";
-  }else if( p->l_type==F_WRLCK ){
-    zType = "WRLCK";
-  }else if( p->l_type==F_UNLCK ){
-    zType = "UNLCK";
-  }else{
-    assert( 0 );
-  }
-  assert( p->l_whence==SEEK_SET );
-  s = osFcntl(fd, op, p);
-  savedErrno = errno;
-  sqlite3DebugPrintf("fcntl %d %d %s %s %d %d %d %d\n",
-     threadid, fd, zOpName, zType, (int)p->l_start, (int)p->l_len,
-     (int)p->l_pid, s);
-  if( s==(-1) && op==F_SETLK && (p->l_type==F_RDLCK || p->l_type==F_WRLCK) ){
-    struct flock l2;
-    l2 = *p;
-    osFcntl(fd, F_GETLK, &l2);
-    if( l2.l_type==F_RDLCK ){
-      zType = "RDLCK";
-    }else if( l2.l_type==F_WRLCK ){
-      zType = "WRLCK";
-    }else if( l2.l_type==F_UNLCK ){
-      zType = "UNLCK";
-    }else{
-      assert( 0 );
-    }
-    sqlite3DebugPrintf("fcntl-failure-reason: %s %d %d %d\n",
-       zType, (int)l2.l_start, (int)l2.l_len, (int)l2.l_pid);
-  }
-  errno = savedErrno;
-  return s;
-}
-#undef osFcntl
-#define osFcntl lockTrace
-#endif /* SQLITE_LOCK_TRACE */
-
 /*
 ** Retry ftruncate() calls that fail due to EINTR
 ** //重试由于EINTR失败的ftruncate()调用
@@ -865,40 +775,6 @@ static int sqliteErrorFromPosixError(int posixError, int sqliteIOErr) {
     return sqliteIOErr;
   }
 }
-
-
-/******************************************************************************
-****************** Begin Unique File ID Utility Used By VxWorks ***************
-**
-** On most versions of unix, we can get a unique ID for a file by concatenating
-** the device number and the inode number.  But this does not work on VxWorks.
-** On VxWorks, a unique file id must be based on the canonical filename.
-** //对大多数版本的unix中，我们可以得到一个唯一的文件ID，通过串联设备数量和i节点数量。
-** //但这不能用在VxWorks.在VxWorks上，一个唯一的文件id必须基于规范的文件名
-**
-** A pointer to an instance of the following structure can be used as a
-** unique file ID in VxWorks.  Each instance of this structure contains
-** a copy of the canonical filename.  There is also a reference count.  
-** The structure is reclaimed when the number of pointers to it drops to
-** zero.
-** //一个指向下列结构体的一个实例指针可以用作VxWorks中的一个唯一的文件ID。这种结构体的每个实例包含一份规范的文件名。
-** //还有一个引用计数。当指针指向它的数目降到零时回收结构体。
-**
-** There are never very many files open at one time and lookups are not
-** a performance-critical path, so it is sufficient to put these
-** structures on a linked list.
-** //有很多文件从来不会打开一次，查找不是性能关键的路径，所以它足以将这些结构放在一个链表上。
-*/
-struct vxworksFileId {
-  struct vxworksFileId *pNext;  /* Next in a list of them all */  //指向链表中的下一个
-  int nRef;                     /* Number of references to this one */  //对这一引用的次数
-  int nName;                    /* Length of the zCanonicalName[] string */  //zCanonicalName[]字符串的长度
-  char *zCanonicalName;         /* Canonical filename */  //规范的文件名
-};
-
-
-/*************** End of Unique File ID Utility Used By VxWorks ****************
-******************************************************************************/
 
 
 /******************************************************************************
@@ -2488,54 +2364,6 @@ static int flockClose(sqlite3_file *id) {
 ******************************************************************************/
 
 /******************************************************************************
-************************ Begin Named Semaphore Locking ************************
-**
-** Named semaphore locking is only supported on VxWorks.
-**
-** Semaphore locking is like dot-lock and flock in that it really only
-** supports EXCLUSIVE locking.  Only a single process can read or write
-** the database file at a time.  This reduces potential concurrency, but
-** makes the lock implementation much easier.
-*/
-
-/*
-** Named semaphore locking is only available on VxWorks.
-**
-*************** End of the named semaphore lock implementation ****************
-******************************************************************************/
-
-
-/******************************************************************************
-*************************** Begin AFP Locking *********************************
-**
-** AFP is the Apple Filing Protocol.  AFP is a network filesystem found
-** on Apple Macintosh computers - both OS9 and OSX.
-**
-** Third-party implementations of AFP are available.  But this code here
-** only works on OSX.
-*/
-
-/*
-** The code above is the AFP lock implementation.  The code is specific
-** to MacOSX and does not work on other unix platforms.  No alternative
-** is available.  If you don't compile for a mac, then the "unix-afp"
-** VFS is not available.
-**
-********************* End of the AFP lock implementation **********************
-******************************************************************************/
-
-/******************************************************************************
-*************************** Begin NFS Locking ********************************/
-
-/*
-** The code above is the NFS lock implementation.  The code is specific
-** to MacOSX and does not work on other unix platforms.  No alternative
-** is available.  
-**
-********************* End of the NFS lock implementation **********************
-******************************************************************************/
-
-/******************************************************************************
 **************** Non-locking sqlite3_file methods *****************************
 **
 ** The next division contains implementations for all methods of the 
@@ -2762,17 +2590,6 @@ static int unixWrite(
   assert( id );
   assert( amt>0 );
 
-  /* If this is a database file (not a journal, super-journal or temp
-  ** file), the bytes in the locking range should never be read or written. 
-  ** 如果这是一个数据库文件（不是一个日志，主文件或者临时文件），锁定范围的字节不能读或写
-  */
-#if 0
-  assert( pFile->pPreallocatedUnused==0
-       || offset>=PENDING_BYTE+512
-       || offset+amt<=PENDING_BYTE 
-  );
-#endif
-
 #if defined(SQLITE_MMAP_READWRITE) && SQLITE_MAX_MMAP_SIZE>0
   /* Deal with as much of this write request as possible by transfering
   ** data from the memory mapping using memcpy().  */
@@ -2811,15 +2628,6 @@ static int unixWrite(
   return SQLITE_OK;
 }
 
-#ifdef SQLITE_TEST
-/*
-** Count the number of fullsyncs and normal syncs.  This is used to test
-** that syncs and fullsyncs are occurring at the right times.
-** 计算fullsyncs和正常syncs的数量，这用来测试syncs和fullsyncs在正确的时间发生。
-*/
-int sqlite3_sync_count = 0;
-int sqlite3_fullsync_count = 0;
-#endif
 
 /*
 ** We do not trust systems to provide a working fdatasync().  Some do.
@@ -2902,17 +2710,6 @@ static int full_fsync(int fd, int fullSync, int dataOnly){
 #else
   UNUSED_PARAMETER(fullSync);
   UNUSED_PARAMETER(dataOnly);
-#endif
-
-  /* Record the number of times that we do a normal fsync() and 
-  ** FULLSYNC.  This is used during testing to verify that this procedure
-  ** gets called with the correct arguments.
-  ** 记录我们做一个正常的fsync()和FULLSUNC的次数。这是在测试期间使用来检验这个
-  ** 过程以正确的参数被调用了。
-  */
-#ifdef SQLITE_TEST
-  if( fullSync ) sqlite3_fullsync_count++;
-  sqlite3_sync_count++;
 #endif
 
   /* If we compiled with the SQLITE_NO_SYNC flag, then syncing is a
@@ -5604,15 +5401,6 @@ static int unixSleep(sqlite3_vfs *NotUsed, int microseconds){
 }
 
 /*
-** The following variable, if set to a non-zero value, is interpreted as
-** the number of seconds since 1970 and is used to set the result of
-** sqlite3OsCurrentTime() during testing.
-*/
-#ifdef SQLITE_TEST
-int sqlite3_current_time = 0;  /* Fake system time in seconds since 1970. */
-#endif
-
-/*
 ** Find the current time (in Universal Coordinated Time).  Write into *piNow
 ** the current time and date as a Julian Day number times 86_400_000.  In
 ** other words, write into *piNow the number of milliseconds since the Julian
@@ -5635,11 +5423,6 @@ static int unixCurrentTimeInt64(sqlite3_vfs *NotUsed, sqlite3_int64 *piNow){
   *piNow = unixEpoch + 1000*(sqlite3_int64)sNow.tv_sec + sNow.tv_usec/1000;
 #endif
 
-#ifdef SQLITE_TEST
-  if( sqlite3_current_time ){
-    *piNow = 1000*(sqlite3_int64)sqlite3_current_time + unixEpoch;
-  }
-#endif
   UNUSED_PARAMETER(NotUsed);
   return rc;
 }
