@@ -243,22 +243,6 @@ struct unixFile {
   unsigned iBusyTimeout;              /* Wait this many millisec on locks */
 #endif
 
-#ifdef SQLITE_DEBUG
-  /* The next group of variables are used to track whether or not the
-  ** transaction counter in bytes 24-27 of database files are updated
-  ** whenever any part of the database changes.  An assertion fault will
-  ** occur if a file is updated without also updating the transaction
-  ** counter.  This test is made to avoid new problems similar to the
-  ** one described by ticket #3584. 
-  ** //下一组变量用来跟踪数据库文件的24-27字节的事务计数器在数据库其他部分发生变化是否更新。如果一个文件
-  ** //更新了但没有更新事务计数器，断言故障就会发生。进行测测试，是为了避免出现新的类似于标签#384描述的问题
-  */
-  unsigned char transCntrChng;   /* True if the transaction counter changed */  //如果事物计数器更改则为True
-  unsigned char dbUpdate;        /* True if any part of database file changed */  //如果数据库文件的任何部分发生了改变则为True
-  unsigned char inNormalWrite;   /* True if in a normal write operation */  //如果在一个正常的写操作内则为True
-
-#endif
-
 #ifdef SQLITE_TEST
   /* In test mode, increase the size of this structure a bit so that 
   ** it is larger than the struct CrashFile defined in test6.c.
@@ -335,13 +319,6 @@ static pid_t randomnessPid = 0;
 # endif
 #endif
 
-/*
-** Explicitly call the 64-bit version of lseek() on Android. Otherwise, lseek()
-** is the 32-bit version, even if _FILE_OFFSET_BITS=64 is defined.
-*/
-#ifdef __ANDROID__
-# define lseek lseek64
-#endif
 
 #ifdef __linux__
 /*
@@ -540,17 +517,7 @@ static struct unix_syscall {
 #endif
 #define osLstat      ((int(*)(const char*,struct stat*))aSyscall[27].pCurrent)
 
-#if defined(__linux__) && defined(SQLITE_ENABLE_BATCH_ATOMIC_WRITE)
-# ifdef __ANDROID__
-  { "ioctl", (sqlite3_syscall_ptr)(int(*)(int, int, ...))ioctl, 0 },
-#define osIoctl ((int(*)(int,int,...))aSyscall[28].pCurrent)
-# else
-  { "ioctl",         (sqlite3_syscall_ptr)ioctl,          0 },
-#define osIoctl ((int(*)(int,unsigned long,...))aSyscall[28].pCurrent)
-# endif
-#else
   { "ioctl",         (sqlite3_syscall_ptr)0,              0 },
-#endif
 
 }; /* End of the overrideable system calls */  //可重写系统调用结束
 
@@ -764,11 +731,6 @@ static void unixLeaveMutex(void){
   assert( sqlite3_mutex_held(unixBigLock) );
   sqlite3_mutex_leave(unixBigLock);
 }
-#ifdef SQLITE_DEBUG
-static int unixMutexHeld(void) {
-  return sqlite3_mutex_held(unixBigLock);
-}
-#endif
 
 
 #ifdef SQLITE_HAVE_OS_TRACE
@@ -862,15 +824,6 @@ static int lockTrace(int fd, int op, struct flock *p){
 */
 static int robust_ftruncate(int h, sqlite3_int64 sz){
   int rc;
-#ifdef __ANDROID__
-  /* On Android, ftruncate() always uses 32-bit offsets, even if 
-  ** _FILE_OFFSET_BITS=64 is defined. This means it is unsafe to attempt to
-  ** truncate a file to any size larger than 2GiB. Silently ignore any
-  ** such attempts.  */
-  if( sz>(sqlite3_int64)0x7FFFFFFF ){
-    rc = SQLITE_OK;
-  }else
-#endif
   do{ rc = osFtruncate(h,sz); }while( rc<0 && errno==EINTR );
   return rc;
 }
@@ -1139,22 +1092,6 @@ struct unixInodeInfo {
 ** //unixInodeInfo的所有对象的列表，为了读或者写这个变量，必须有unixBigLock
 */
 static unixInodeInfo *inodeList = 0;  /* All unixInodeInfo objects */
-
-#ifdef SQLITE_DEBUG
-/*
-** True if the inode mutex (on the unixFile.pFileMutex field) is held, or not.
-** This routine is used only within assert() to help verify correct mutex
-** usage.
-*/
-int unixFileMutexHeld(unixFile *pFile){
-  assert( pFile->pInode );
-  return sqlite3_mutex_held(pFile->pInode->pLockMutex);
-}
-int unixFileMutexNotheld(unixFile *pFile){
-  assert( pFile->pInode );
-  return sqlite3_mutex_notheld(pFile->pInode->pLockMutex);
-}
-#endif
 
 /*
 **
@@ -1829,25 +1766,6 @@ static int unixLock(sqlite3_file *id, int eFileLock){
   }
   
 
-#ifdef SQLITE_DEBUG
-  /* Set up the transaction-counter change checking flags when
-  ** transitioning from a SHARED to a RESERVED lock.  The change
-  ** from SHARED to RESERVED marks the beginning of a normal
-  ** write operation (not a hot journal rollback).
-  ** 设置事务计数器改变检查标记，当从共享锁转换到保留锁时。
-  ** 从共享锁转换到保留锁标志着一个正常的写操作（不是热日志回滚）开始了。
-  */
-  if( rc==SQLITE_OK
-   && pFile->eFileLock<=SHARED_LOCK
-   && eFileLock==RESERVED_LOCK
-  ){
-    pFile->transCntrChng = 0;
-    pFile->dbUpdate = 0;
-    pFile->inNormalWrite = 1;
-  }
-#endif
-
-
   if( rc==SQLITE_OK ){
     pFile->eFileLock = eFileLock;
     pInode->eFileLock = eFileLock;
@@ -1916,21 +1834,6 @@ static int posixUnlock(sqlite3_file *id, int eFileLock, int handleNFSUnlock){
   assert( pInode->nShared!=0 );
   if( pFile->eFileLock>SHARED_LOCK ){
     assert( pInode->eFileLock==pFile->eFileLock );
-
-#ifdef SQLITE_DEBUG
-    /* When reducing a lock such that other processes can start
-    ** reading the database file again, make sure that the
-    ** transaction counter was updated if any part of the database
-    ** file changed.  If the transaction counter is not updated,
-    ** other connections to the same file might not realize that
-    ** the file has changed and hence might not know to flush their
-    ** cache.  The use of a stale cache can lead to database corruption.
-    ** 当减少锁以便其他进程可以再次读取数据库文件的时候，要确保事务计数器已经更新。如果数据库文件的任何部分
-    ** 发生了改变。如果事务计数器没有更新，对同一文件的其他连接可能没有意识到改文件已经更改，因此可能不知道
-    ** 要刷新其缓存，使用旧的缓存可能会导致数据库的损坏。
-    */
-    pFile->inNormalWrite = 0;
-#endif
 
     /* downgrading to a shared lock on NFS involves clearing the write lock
     ** before establishing the readlock - to avoid a race condition we downgrade
@@ -2870,31 +2773,6 @@ static int unixWrite(
   );
 #endif
 
-#ifdef SQLITE_DEBUG
-  /* If we are doing a normal write to a database file (as opposed to
-  ** doing a hot-journal rollback or a write to some file other than a
-  ** normal database file) then record the fact that the database
-  ** has changed.  If the transaction counter is modified, record that
-  ** fact too.
-  ** 如果我们正常写入一个数据库文件（而不是做一个热日志回滚或者写入到一些不同于
-  ** 正常数据库文件的文件）那么记录数据库改变的事实。如果事务计数器被修改，也记录
-  ** 这个事实。
-  */
-  if( pFile->inNormalWrite ){
-    pFile->dbUpdate = 1;  /* The database has been modified */  //数据库被修改
-    if( offset<=24 && offset+amt>=27 ){
-      int rc;
-      char oldCntr[4];
-      SimulateIOErrorBenign(1);
-      rc = seekAndRead(pFile, 24, oldCntr, 4);
-      SimulateIOErrorBenign(0);
-      if( rc!=4 || memcmp(oldCntr, &((char*)pBuf)[24-offset], 4)!=0 ){
-        pFile->transCntrChng = 1;  /* The transaction counter has changed */
-      }
-    }
-  }
-#endif
-
 #if defined(SQLITE_MMAP_READWRITE) && SQLITE_MAX_MMAP_SIZE>0
   /* Deal with as much of this write request as possible by transfering
   ** data from the memory mapping using memcpy().  */
@@ -3072,9 +2950,6 @@ static int full_fsync(int fd, int fullSync, int dataOnly){
 
 #endif /* ifdef SQLITE_NO_SYNC elif HAVE_FULLFSYNC */
 
-  if( OS_VXWORKS && rc!= -1 ){
-    rc = 0;
-  }
   return rc;
 }
 
@@ -3231,21 +3106,6 @@ static int unixTruncate(sqlite3_file *id, i64 nByte){
     storeLastErrno(pFile, errno);
     return unixLogError(SQLITE_IOERR_TRUNCATE, "ftruncate", pFile->zPath);
   }else{
-#ifdef SQLITE_DEBUG
-    /* If we are doing a normal write to a database file (as opposed to
-    ** doing a hot-journal rollback or a write to some file other than a
-    ** normal database file) and we truncate the file to zero length,
-    ** that effectively updates the change counter.  This might happen
-    ** when restoring a database using the backup API from a zero-length
-    ** source.
-    ** 如果我们正常写入到数据文件（而不是做一个热日志回滚或者写入到一些不是正常数据库文件的文件
-    ** ），我们截断文件长度为零，这有效的更新改变计数器。这可能发生，当从一个0长度的源使用备份
-    ** API来恢复数据库。
-    */
-    if( pFile->inNormalWrite && nByte==0 ){
-      pFile->transCntrChng = 1;
-    }
-#endif
 
 #if SQLITE_MAX_MMAP_SIZE>0
     /* If the file was just truncated to a size smaller than the currently
@@ -3484,19 +3344,7 @@ static int unixFileControl(sqlite3_file *id, int op, void *pArg){
       return rc;
     }
 #endif
-#ifdef SQLITE_DEBUG
-    /* The pager calls this method to signal that it has done
-    ** a rollback and that the database is therefore unchanged and
-    ** it hence it is OK for the transaction change counter to be
-    ** unchanged.
-    ** 呼叫器调用这个方法来标示它已经做了一个回滚，因此数据库不改变，并且它表示
-    ** 计数器改变计数不变是没问题的。
-    */
-    case SQLITE_FCNTL_DB_UNCHANGED: {
-      ((unixFile*)id)->dbUpdate = 0;
-      return SQLITE_OK;
-    }
-#endif
+
   }
   return SQLITE_NOTFOUND;
 }
@@ -3661,8 +3509,6 @@ static int unixDeviceCharacteristics(sqlite3_file *id){
 ** Instead, it should be called via macro osGetpagesize().
 */
 static int unixGetpagesize(void){
-#elif defined(_BSD_SOURCE)
-  return getpagesize();
 #else
   return (int)sysconf(_SC_PAGESIZE);
 #endif
@@ -3724,11 +3570,6 @@ struct unixShmNode {
   int nRef;                  /* Number of unixShm objects pointing to this */ //许多unixShm对象指向这一点
   unixShm *pFirst;           /* All unixShm objects pointing to this */
   int aLock[SQLITE_SHM_NLOCK];  /* # shared locks on slot, -1==excl lock */
-#ifdef SQLITE_DEBUG
-  u8 exclMask;               /* Mask of exclusive locks held */ //持有排它锁掩码
-  u8 sharedMask;             /* Mask of shared locks held */ //持有共享锁的掩码
-  u8 nextShmId;              /* Next available unixShm.id value */
-#endif
 };
 
 /*
@@ -3811,41 +3652,6 @@ static int unixShmSystemLock(
 #endif
     }
   }
-
-  /* Update the global lock state and do debug tracing */
-#ifdef SQLITE_DEBUG
-  { u16 mask;
-  OSTRACE(("SHM-LOCK "));
-  mask = ofst>31 ? 0xffff : (1<<(ofst+n)) - (1<<ofst);
-  if( rc==SQLITE_OK ){
-    if( lockType==F_UNLCK ){
-      OSTRACE(("unlock %d ok", ofst));
-      pShmNode->exclMask &= ~mask;
-      pShmNode->sharedMask &= ~mask;
-    }else if( lockType==F_RDLCK ){
-      OSTRACE(("read-lock %d ok", ofst));
-      pShmNode->exclMask &= ~mask;
-      pShmNode->sharedMask |= mask;
-    }else{
-      assert( lockType==F_WRLCK );
-      OSTRACE(("write-lock %d ok", ofst));
-      pShmNode->exclMask |= mask;
-      pShmNode->sharedMask &= ~mask;
-    }
-  }else{
-    if( lockType==F_UNLCK ){
-      OSTRACE(("unlock %d failed", ofst));
-    }else if( lockType==F_RDLCK ){
-      OSTRACE(("read-lock failed"));
-    }else{
-      assert( lockType==F_WRLCK );
-      OSTRACE(("write-lock %d failed", ofst));
-    }
-  }
-  OSTRACE((" - afterwards %03x,%03x\n",
-           pShmNode->sharedMask, pShmNode->exclMask));
-  }
-#endif
 
   return rc;        
 }
@@ -4091,9 +3897,6 @@ static int unixOpenSharedMemory(unixFile *pDbFd){
 
   /* Make the new connection a child of the unixShmNode */
   p->pShmNode = pShmNode;
-#ifdef SQLITE_DEBUG
-  p->id = pShmNode->nextShmId++;
-#endif
   pShmNode->nRef++;
   pDbFd->pShm = p;
   unixLeaveMutex();
@@ -4273,37 +4076,6 @@ shmpage_out:
   return rc;
 }
 
-/*
-** Check that the pShmNode->aLock[] array comports with the locking bitmasks
-** held by each client. Return true if it does, or false otherwise. This
-** is to be used in an assert(). e.g.
-**
-**     assert( assertLockingArrayOk(pShmNode) );
-*/
-#ifdef SQLITE_DEBUG
-static int assertLockingArrayOk(unixShmNode *pShmNode){
-  unixShm *pX;
-  int aLock[SQLITE_SHM_NLOCK];
-  assert( sqlite3_mutex_held(pShmNode->pShmMutex) );
-
-  memset(aLock, 0, sizeof(aLock));
-  for(pX=pShmNode->pFirst; pX; pX=pX->pNext){
-    int i;
-    for(i=0; i<SQLITE_SHM_NLOCK; i++){
-      if( pX->exclMask & (1<<i) ){
-        assert( aLock[i]==0 );
-        aLock[i] = -1;
-      }else if( pX->sharedMask & (1<<i) ){
-        assert( aLock[i]>=0 );
-        aLock[i]++;
-      }
-    }
-  }
-
-  assert( 0==memcmp(pShmNode->aLock, aLock, sizeof(aLock)) );
-  return (memcmp(pShmNode->aLock, aLock, sizeof(aLock))==0);
-}
-#endif
 
 /*
 ** Change the lock state for a shared-memory segment.
